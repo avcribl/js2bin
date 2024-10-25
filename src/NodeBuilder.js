@@ -213,6 +213,14 @@ class NodeJsBuilder {
       this.nodePath('vcbuild.bat'),
       join(this.patchDir, 'vcbuild.bat.patch'));
 
+    isWindows && await patchFile(
+      this.nodePath('deps', 'v8', 'BUILD.gn'),
+      join(this.patchDir, 'BUILD.gn.patch'));
+
+    isWindows && await patchFile(
+      this.nodePath('deps', 'v8', 'src', 'sandbox', 'sandboxed-pointer-inl.h'),
+      join(this.patchDir, 'sandboxed-pointer-inl.h.patch'));
+
     isLinux && await patchFile(
       this.nodePath('deps','cares','config','linux','ares_config.h'),
       join(this.patchDir, 'no_rand_on_glibc.patch'));
@@ -224,7 +232,7 @@ class NodeJsBuilder {
   }
 
   printDiskUsage() {
-    if (isWindows) { return runCommand('fsutil', ['volume', 'diskfree', 'd:']); }
+    if (isWindows) { return runCommand('fsutil', ['volume', 'diskfree', 'C:']); }
     return runCommand('df', ['-h']);
   }
 
