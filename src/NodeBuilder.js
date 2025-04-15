@@ -221,6 +221,9 @@ class NodeJsBuilder {
     if (isWindows) {
       await patchFile(this.nodePath('vcbuild.bat'), join(this.patchDir, 'vcbuild.bat.patch'));
       await patchFile(this.nodePath('deps', 'v8', 'include', 'v8config.h'), join(this.patchDir, 'v8config.patch'));
+      await patchFile(this.nodePath('configure.py'), join(this.patchDir, 'configurev2.py.patch'));
+      await patchFile(this.nodePath('tools', 'v8_gypfiles', 'features.gypi'), join(this.patchDir, 'features.gypi.patch'));
+      await patchFile(this.nodePath('src', 'node_buffer.cc'), join(this.patchDir, 'node_buffer.cc.patch'));
     }
 
     isLinux && await patchFile(

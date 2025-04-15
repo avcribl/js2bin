@@ -1,0 +1,173 @@
+diff --git a/src/node_buffer.cc b/src/node_buffer.cc
+index cd51d9acf9..5cde9c12a6 100644
+--- a/src/node_buffer.cc
++++ b/src/node_buffer.cc
+@@ -82,6 +82,89 @@ using v8::Uint32Array;
+ using v8::Uint8Array;
+ using v8::Value;
+ 
++// Helper function to create a sandbox-aware backing store
++std::unique_ptr<BackingStore> CreateBackingStore(
++    Isolate* isolate,
++    void* data,
++    size_t byte_length,
++    BackingStore::DeleterCallback deleter,
++    void* deleter_data) {
++#ifdef V8_ENABLE_SANDBOX
++  // When V8 sandbox is enabled, we need to allocate memory through V8's
++  // ArrayBuffer::Allocator to ensure it's within the sandbox memory region.
++  // This creates a new backing store by first allocating memory through V8,
++  // copying any existing data into it, and setting up proper deallocation.
++  ArrayBuffer::Allocator* allocator = isolate->GetArrayBufferAllocator();
++  if (!allocator) {
++    fprintf(stderr, "Failed to get array buffer allocator\n");
++    return nullptr;
++  }
++  
++  // Allocate memory using the isolate's allocator to ensure it's within the sandbox
++  void* allocated_memory = allocator->Allocate(byte_length);
++  if (!allocated_memory) {
++    fprintf(stderr, "Failed to allocate memory\n");
++    return nullptr;
++  }
++
++  // If we have data to copy, copy it into the allocated memory
++  if (data != nullptr) {
++    memcpy(allocated_memory, data, byte_length);
++  }
++
++  // Define a structure to hold all the information needed for proper memory cleanup
++  struct BackingStoreDeleterContext {
++    BackingStore::DeleterCallback original_deleter;  // Original callback to free external resources
++    void* original_deleter_data;                     // Data passed to the original deleter
++    void* original_data;                             // Original data pointer
++    ArrayBuffer::Allocator* allocator;               // Allocator used to free the memory
++  };
++  
++  // Create a new deletion context with all the necessary information
++  BackingStoreDeleterContext* deletion_context = new BackingStoreDeleterContext{deleter, deleter_data, data, allocator};
++
++  // Create the backing store with the allocated data and a custom deleter
++  auto store = ArrayBuffer::NewBackingStore(
++    allocated_memory, 
++    byte_length, 
++    [](void* data, size_t length, void* deletion_context_ptr) {
++      
++      // Cast the deleter data back to our context structure
++      auto* context = static_cast<BackingStoreDeleterContext*>(deletion_context_ptr);
++      
++      // Call the original deleter if it exists to clean up any external resources
++      if (context->original_deleter != nullptr) {
++        context->original_deleter(context->original_data, length, context->original_deleter_data);
++      }
++
++      // Free the memory using the allocator
++      context->allocator->Free(data, length);
++
++      // Clean up our deletion context
++      delete context;
++    },
++    deletion_context  // Pass our deletion context to the lambda
++  );
++
++  // Handle the case where backing store creation fails
++  if (!store) {
++    fprintf(stderr, "Failed to create backing store\n");
++    deletion_context->allocator->Free(allocated_memory, byte_length);
++    delete deletion_context;
++    return nullptr;
++  }
++
++  return store;
++#else
++  // When sandbox is not enabled, we can directly create the backing store
++  if (deleter != nullptr) {
++    return ArrayBuffer::NewBackingStore(data, byte_length, deleter, deleter_data);
++  } else {
++    return ArrayBuffer::NewBackingStore(isolate, byte_length);
++  }
++#endif
++}
++
+ namespace {
+ 
+ class CallbackInfo : public Cleanable {
+@@ -123,7 +206,7 @@ Local<ArrayBuffer> CallbackInfo::CreateTrackedArrayBuffer(
+ 
+   CallbackInfo* self = new CallbackInfo(env, callback, data, hint);
+   std::unique_ptr<BackingStore> bs =
+-      ArrayBuffer::NewBackingStore(data, length, [](void*, size_t, void* arg) {
++      CreateBackingStore(env->isolate(), data, length, [](void*, size_t, void* arg) {
+         static_cast<CallbackInfo*>(arg)->OnBackingStoreFree();
+       }, self);
+   Local<ArrayBuffer> ab = ArrayBuffer::New(env->isolate(), std::move(bs));
+@@ -194,7 +277,7 @@ void CallbackInfo::OnBackingStoreFree() {
+   // If callback_ == nullptr, that means that the callback has already run from
+   // the cleanup hook, and there is nothing left to do here besides to clean
+   // up the memory involved. In particular, the underlying `Environment` may
+-  // be gone at this point, so don’t attempt to call SetImmediateThreadsafe().
++  // be gone at this point, so don't attempt to call SetImmediateThreadsafe().
+   if (callback_ == nullptr) return;
+ 
+   env_->SetImmediateThreadsafe([self = std::move(self)](Environment* env) {
+@@ -310,7 +393,7 @@ MaybeLocal<Object> New(Isolate* isolate,
+   std::unique_ptr<BackingStore> store;
+ 
+   if (length > 0) {
+-    store = ArrayBuffer::NewBackingStore(isolate, length);
++    store = CreateBackingStore(isolate, nullptr, length, nullptr, nullptr);
+ 
+     if (!store) [[unlikely]] {
+       THROW_ERR_MEMORY_ALLOCATION_FAILED(isolate);
+@@ -328,7 +411,7 @@ MaybeLocal<Object> New(Isolate* isolate,
+     if (actual > 0) [[likely]] {
+       if (actual < length) {
+         std::unique_ptr<BackingStore> old_store = std::move(store);
+-        store = ArrayBuffer::NewBackingStore(isolate, actual);
++        store = CreateBackingStore(isolate, nullptr, actual, nullptr, nullptr);
+         memcpy(static_cast<char*>(store->Data()),
+                static_cast<char*>(old_store->Data()),
+                actual);
+@@ -374,7 +457,7 @@ MaybeLocal<Object> New(Environment* env, size_t length) {
+   {
+     NoArrayBufferZeroFillScope no_zero_fill_scope(env->isolate_data());
+     std::unique_ptr<BackingStore> bs =
+-        ArrayBuffer::NewBackingStore(isolate, length);
++        CreateBackingStore(isolate, nullptr, length, nullptr, nullptr);
+ 
+     CHECK(bs);
+ 
+@@ -417,7 +500,7 @@ MaybeLocal<Object> Copy(Environment* env, const char* data, size_t length) {
+   {
+     NoArrayBufferZeroFillScope no_zero_fill_scope(env->isolate_data());
+     std::unique_ptr<BackingStore> bs =
+-        ArrayBuffer::NewBackingStore(isolate, length);
++        CreateBackingStore(isolate, nullptr, length, nullptr, nullptr);
+ 
+     CHECK(bs);
+ 
+@@ -518,7 +601,7 @@ MaybeLocal<Object> New(Environment* env,
+     free(data);
+   };
+   std::unique_ptr<BackingStore> bs =
+-      v8::ArrayBuffer::NewBackingStore(data, length, free_callback, nullptr);
++      CreateBackingStore(env->isolate(), data, length, free_callback, nullptr);
+ 
+   Local<ArrayBuffer> ab = v8::ArrayBuffer::New(env->isolate(), std::move(bs));
+ 
+@@ -1235,10 +1318,11 @@ void GetZeroFillToggle(const FunctionCallbackInfo<Value>& args) {
+   } else {
+     uint32_t* zero_fill_field = allocator->zero_fill_field();
+     std::unique_ptr<BackingStore> backing =
+-        ArrayBuffer::NewBackingStore(zero_fill_field,
+-                                     sizeof(*zero_fill_field),
+-                                     [](void*, size_t, void*) {},
+-                                     nullptr);
++        CreateBackingStore(env->isolate(),
++                         zero_fill_field,
++                         sizeof(*zero_fill_field),
++                         [](void*, size_t, void*) {},
++                         nullptr);
+     ab = ArrayBuffer::New(env->isolate(), std::move(backing));
+   }
+ 
