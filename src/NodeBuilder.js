@@ -1,5 +1,5 @@
 
-const { log, download, upload, fetch, mkdirp, rmrf, copyFileAsync, runCommand, renameAsync, patchFile } = require('./util');
+const { log, download, upload, fetch, mkdirp, rmrf, copyFileAsync, runCommand, renameAsync, patchFile, patchMultipleFiles } = require('./util');
 const { gzipSync, createGunzip } = require('zlib');
 const { join, dirname, basename, parse, resolve } = require('path');
 const fs = require('fs');
@@ -221,10 +221,12 @@ class NodeJsBuilder {
     if (isWindows) {
       await patchFile(this.nodePath('vcbuild.bat'), join(this.patchDir, 'vcbuild.bat.patch'));
       await patchFile(this.nodePath('deps', 'v8', 'include', 'v8config.h'), join(this.patchDir, 'v8config.patch'));
-      await patchFile(this.nodePath('configure.py'), join(this.patchDir, 'configurev2.py.patch'));
-      await patchFile(this.nodePath('tools', 'v8_gypfiles', 'features.gypi'), join(this.patchDir, 'features.gypi.patch'));
-      await patchFile(this.nodePath('src', 'node_buffer.cc'), join(this.patchDir, 'node_buffer.cc.patch'));
     }
+    await patchFile(this.nodePath('configure.py'), join(this.patchDir, 'configurev2.py.patch'));
+    await patchFile(this.nodePath('tools', 'v8_gypfiles', 'features.gypi'), join(this.patchDir, 'features.gypi.patch'));
+    await patchFile(this.nodePath('src', 'node_buffer.cc'), join(this.patchDir, 'node_buffer.cc.patch'));
+    await patchMultipleFiles(this.nodeSrcDir, join(this.patchDir, 'v8_backing_store_callers.patch'));
+    // throw new Error('stop here');
 
     isLinux && await patchFile(
       this.nodePath('deps','cares','config','linux','ares_config.h'),

@@ -1,5 +1,3 @@
-diff --git a/src/node_buffer.cc b/src/node_buffer.cc
-index cd51d9acf9..5cde9c12a6 100644
 --- a/src/node_buffer.cc
 +++ b/src/node_buffer.cc
 @@ -82,6 +82,89 @@ using v8::Uint32Array;
@@ -101,15 +99,6 @@ index cd51d9acf9..5cde9c12a6 100644
          static_cast<CallbackInfo*>(arg)->OnBackingStoreFree();
        }, self);
    Local<ArrayBuffer> ab = ArrayBuffer::New(env->isolate(), std::move(bs));
-@@ -194,7 +277,7 @@ void CallbackInfo::OnBackingStoreFree() {
-   // If callback_ == nullptr, that means that the callback has already run from
-   // the cleanup hook, and there is nothing left to do here besides to clean
-   // up the memory involved. In particular, the underlying `Environment` may
--  // be gone at this point, so don’t attempt to call SetImmediateThreadsafe().
-+  // be gone at this point, so don't attempt to call SetImmediateThreadsafe().
-   if (callback_ == nullptr) return;
- 
-   env_->SetImmediateThreadsafe([self = std::move(self)](Environment* env) {
 @@ -310,7 +393,7 @@ MaybeLocal<Object> New(Isolate* isolate,
    std::unique_ptr<BackingStore> store;
  
@@ -170,4 +159,3 @@ index cd51d9acf9..5cde9c12a6 100644
 +                         nullptr);
      ab = ArrayBuffer::New(env->isolate(), std::move(backing));
    }
- 
