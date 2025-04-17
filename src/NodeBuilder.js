@@ -217,11 +217,13 @@ class NodeJsBuilder {
     if (isWindows) {
       await patchFile(this.nodePath('vcbuild.bat'), join(this.patchDir, 'vcbuild.bat.patch'));
       await patchFile(this.nodePath('deps', 'v8', 'include', 'v8config.h'), join(this.patchDir, 'v8config.patch'));
+      // The following patches fix the memory leak when using pointer compression
+      // They are fixing both Linux and Windows, however, we only apply them to Windows to keep the blast radius small
+      await patchFile(this.nodePath('configure.py'), join(this.patchDir, 'configure.py.patch'));
+      await patchFile(this.nodePath('tools', 'v8_gypfiles', 'features.gypi'), join(this.patchDir, 'features.gypi.patch'));
+      await patchFile(this.nodePath('src', 'node_buffer.cc'), join(this.patchDir, 'node_buffer.cc.patch'));
+      await patchMultipleFiles(this.nodeSrcDir, join(this.patchDir, 'v8_backing_store_callers.patch'));
     }
-    await patchFile(this.nodePath('configure.py'), join(this.patchDir, 'configure.py.patch'));
-    await patchFile(this.nodePath('tools', 'v8_gypfiles', 'features.gypi'), join(this.patchDir, 'features.gypi.patch'));
-    await patchFile(this.nodePath('src', 'node_buffer.cc'), join(this.patchDir, 'node_buffer.cc.patch'));
-    await patchMultipleFiles(this.nodeSrcDir, join(this.patchDir, 'v8_backing_store_callers.patch'));
 
     isLinux && await patchFile(
       this.nodePath('deps','cares','config','linux','ares_config.h'),
