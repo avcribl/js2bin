@@ -6,9 +6,6 @@ const { promisify } = require('util');
 const fs = require('fs');
 const { URL } = require('url');
 const { pipeline } = require('stream');
-const fsPromises = require('fs').promises;
-const path = require('path');
-const diff = require('diff');
 
 const mkdirAsync = promisify(fs.mkdir);
 const copyFileAsync = promisify(fs.copyFile);
@@ -82,16 +79,17 @@ function runCommand(command, args = [], cwd = undefined, env = undefined, verbos
   });
 }
 
-async function patchFile1(file, patchFile) {
-  if(!fs.existsSync(patchFile)) return; // noop
+async function patchFile(baseDir, patchFile) {
+  if (!fs.existsSync(patchFile)) return; // noop
   await new Promise((resolve, reject) => {
     const proc = spawn(
       'patch',
       [
-        '-uN',
-        file
+        '-uN', // Unified patch format
+        '-p1' // Adjust the file path by stripping leading directories (a/ and b/)
       ],
       {
+        cwd: baseDir, // Apply the patches in the provided directory (baseDir)
         stdio: [
           null,
           'inherit',
@@ -108,84 +106,6 @@ async function patchFile1(file, patchFile) {
       proc.stdin,
       err => err ? reject(err) : undefined
     );
-  });
-}
-
-
-async function patchFile(baseDir, patchFile) {
-  if (!fs.existsSync(patchFile)) return; // noop if the patch file doesn't exist
-
-  // Use `patch` to apply the multi-patch file
-  await new Promise((resolve, reject) => {
-    const proc = spawn(
-      'patch',
-      [
-        '-uN', // Unified patch format
-        '-p1', // Adjust the file path by stripping leading directories
-        // The `patch` command will automatically handle all file patches in the patch file
-      ],
-      {
-        cwd: baseDir, // Apply the patches in the provided directory (baseDir)
-        stdio: [
-          null, // No input for patch
-          'inherit', // Output to the terminal
-          'inherit', // Error output to the terminal
-        ],
-      }
-    );
-
-    proc.once('exit', (code) => {
-      if (code !== 0) {
-        return reject(new Error(`Failed to patch with patch file ${patchFile}. Exit code: ${code}`));
-      }
-      return resolve();
-    });
-
-    proc.once('error', reject);
-
-    // Pass the patch file through stdin of the patch process
-    pipeline(
-      fs.createReadStream(patchFile),
-      proc.stdin,
-      (err) => (err ? reject(err) : undefined)
-    );
-  });
-}
-
-
-// Helper function to apply a patch to a file's content
-async function applyOnePatch(fileContent, patch) {
-  const patchDiff = diff.parsePatch(patch);
-  const patchedContent = diff.applyPatch(fileContent, patchDiff[0]);
-  return patchedContent;
-}
-
-// Function to patch multiple files using a patch file containing multiple patches
-async function patchMultipleFiles(baseDir, patchFile) {
-  if (!fs.existsSync(patchFile)) return; // noop
-  let patchData = await fsPromises.readFile(patchFile, 'utf8');
-
-  // Normalize line endings (convert all \r\n to \n). This is necessary for the Windows builds.
-  patchData = patchData.replace(/\r\n/g, '\n');
-
-  // Split the patch data into individual patches (by looking for '--- ' to split the diffs)
-  // This will split at every `--- ` line
-  const patches = patchData.split(/\n(?=--- )/);
-
-  console.log(`Total ${patches.length} patches found in ${patchFile}`);
-
-  patches.forEach(async (patch, index) => {
-    // Split the patch into lines
-    const patchLines = patch.split('\n');
-    // Extract file path from the first line
-    const filePathMatch = patchLines[0].split(' ')[1];
-    // Remove the 'a/' or 'b/' prefix from the file path
-    const filePath = filePathMatch.trim().slice(2);
-    const fullFilePath = path.join(baseDir, filePath);
-    const fileContent = await fsPromises.readFile(fullFilePath, 'utf8');
-    const newContent = await applyOnePatch(fileContent, patch);
-    await fsPromises.writeFile(fullFilePath, newContent, 'utf8');
-    console.log(`Patched file: ${fullFilePath}`);
   });
 }
 
@@ -337,7 +257,5 @@ module.exports = {
   rmrf,
   copyFileAsync,
   renameAsync,
-  patchFile,
-  patchMultipleFiles,
-  // patchFiles
+  patchFile
 };

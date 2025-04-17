@@ -1,4 +1,4 @@
-const { log, download, upload, fetch, mkdirp, rmrf, copyFileAsync, runCommand, renameAsync, patchFile, patchMultipleFiles, patchFiles } = require('./util');
+const { log, download, upload, fetch, mkdirp, rmrf, copyFileAsync, runCommand, renameAsync, patchFile } = require('./util');
 const { gzipSync, createGunzip } = require('zlib');
 const { join, dirname, basename, parse, resolve } = require('path');
 const fs = require('fs');
@@ -197,21 +197,13 @@ class NodeJsBuilder {
   }
 
   async patchThirdPartyMain() {
-    await patchFile(
-      this.nodeSrcDir,
-      join(this.patchDir, 'run_third_party_main.js.patch'));
-    await patchFile(
-      this.nodeSrcDir,
-      join(this.patchDir, 'node.cc.patch'));
-    await patchFile(
-      this.nodeSrcDir,
-      join(this.patchDir, 'fs-event.c.patch'));
+    await patchFile(this.nodeSrcDir, join(this.patchDir, 'run_third_party_main.js.patch'));
+    await patchFile(this.nodeSrcDir, join(this.patchDir, 'node.cc.patch'));
+    await patchFile(this.nodeSrcDir, join(this.patchDir, 'fs-event.c.patch'));
   }
 
   async patchNodeCompileIssues() {
-    await patchFile(
-      this.nodeSrcDir,
-      join(this.patchDir, 'node.gyp.patch'));
+    await patchFile(this.nodeSrcDir, join(this.patchDir, 'node.gyp.patch'));
 
     if (isWindows) {
       await patchFile(this.nodeSrcDir, join(this.patchDir, 'vcbuild.bat.patch'));
@@ -222,13 +214,10 @@ class NodeJsBuilder {
       await patchFile(this.nodeSrcDir, join(this.patchDir, 'features.gypi.patch'));
       await patchFile(this.nodeSrcDir, join(this.patchDir, 'node_buffer.cc.patch'));
       await patchFile(this.nodeSrcDir, join(this.patchDir, 'v8_backing_store_callers.patch'));
-      // await patchMultipleFiles(this.nodeSrcDir, join(this.patchDir, 'v8_backing_store_callers.patch'));
     }
 
     if (isLinux) {
-      await patchFile(
-        this.nodeSrcDir,
-        join(this.patchDir, 'no_rand_on_glibc.patch'));
+      await patchFile(this.nodeSrcDir, join(this.patchDir, 'no_rand_on_glibc.patch'));
     }
   }
 
