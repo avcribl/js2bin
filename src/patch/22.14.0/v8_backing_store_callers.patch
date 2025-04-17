@@ -16,7 +16,8 @@
 +  store_ = node::Buffer::CreateBackingStore(isolate, nullptr, sizeof(T), nullptr, nullptr);
    ptr_ = new (store_->Data()) T(std::forward<Args>(args)...);
    DCHECK_NOT_NULL(ptr_);
- 
+
+
 --- a/src/crypto/crypto_cipher.cc
 +++ b/src/crypto/crypto_cipher.cc
 @@ -776,7 +776,7 @@ CipherBase::UpdateResult CipherBase::Update(
@@ -97,6 +98,7 @@
             static_cast<char*>(old_out->Data()),
             out_len);
 
+
 --- a/src/crypto/crypto_common.cc
 +++ b/src/crypto/crypto_common.cc
 @@ -310,7 +310,7 @@ MaybeLocal<Object> ECPointToBuffer(Environment* env,
@@ -108,6 +110,7 @@
    }
  
    len = EC_POINT_point2oct(group,
+
 
 --- a/src/crypto/crypto_dh.cc
 +++ b/src/crypto/crypto_dh.cc
@@ -129,6 +132,7 @@
        data.get(),
        data.size(),
        [](void* data, size_t len, void* ptr) { DataPointer free_me(data, len); },
+
 
 --- a/src/crypto/crypto_ec.cc
 +++ b/src/crypto/crypto_ec.cc
@@ -152,34 +156,6 @@
    CHECK_EQ(bs->ByteLength(),
             BignumPointer::EncodePaddedInto(
 
-
-
-
-
-
-
-
-
---- a/src/env.cc
-+++ b/src/env.cc
-@@ -653,7 +653,7 @@ void IsolateData::MemoryInfo(MemoryTracker* tracker) const {
- 
- void TrackingTraceStateObserver::UpdateTraceCategoryState() {
-   if (!env_->owns_process_state() || !env_->can_call_into_js()) {
--    // Ideally, we’d have a consistent story that treats all threads/Environment
-+    // Ideally, we'd have a consistent story that treats all threads/Environment
-     // instances equally here. However, tracing is essentially global, and this
-     // callback is called from whichever thread calls `StartTracing()` or
-     // `StopTracing()`. The only way to do this in a threadsafe fashion
-@@ -750,7 +750,7 @@ void Environment::add_refs(int64_t diff) {
- uv_buf_t Environment::allocate_managed_buffer(const size_t suggested_size) {
-   NoArrayBufferZeroFillScope no_zero_fill_scope(isolate_data());
-   std::unique_ptr<v8::BackingStore> bs =
--      v8::ArrayBuffer::NewBackingStore(isolate(), suggested_size);
-+      node::Buffer::CreateBackingStore(isolate(), nullptr, suggested_size, nullptr, nullptr);
-   uv_buf_t buf = uv_buf_init(static_cast<char*>(bs->Data()), bs->ByteLength());
-   released_allocated_buffers_.emplace(buf.base, std::move(bs));
-   return buf;
 
 --- a/src/node_blob.cc
 +++ b/src/node_blob.cc
@@ -219,6 +195,7 @@
        for (size_t n = 0; n < count; n++) {
          std::copy(vecs[n].base, vecs[n].base + vecs[n].len, ptr);
 
+
 --- a/src/node_buffer.h
 +++ b/src/node_buffer.h
 @@ -86,6 +86,13 @@ static inline bool IsWithinBounds(size_t off, size_t len, size_t max) {
@@ -234,7 +211,8 @@
 +
  }  // namespace Buffer
  }  // namespace node
- 
+
+
 --- a/src/node_http2.cc
 +++ b/src/node_http2.cc
 @@ -295,7 +295,7 @@ Local<Value> Http2Settings::Pack(
@@ -279,6 +257,7 @@
      memcpy(static_cast<char*>(new_bs->Data()),
             stream_buf_.base + stream_buf_offset_,
 
+
 --- a/src/node_sea.cc
 +++ b/src/node_sea.cc
 @@ -12,6 +12,7 @@
@@ -299,6 +278,7 @@
        const_cast<char*>(it->second.data()),
        it->second.size(),
        [](void*, size_t, void*) {},
+
 
 --- a/src/node_sqlite.cc
 +++ b/src/node_sqlite.cc
@@ -329,6 +309,7 @@
        auto ab = ArrayBuffer::New(env()->isolate(), std::move(store));
        return Uint8Array::New(ab, 0, size);
 
+
 --- a/src/node_trace_events.cc
 +++ b/src/node_trace_events.cc
 @@ -4,6 +4,7 @@
@@ -350,6 +331,7 @@
        sizeof(*enabled_pointer_cast),
        [](void*, size_t, void*) {},
 
+
 --- a/src/quic/session.cc
 +++ b/src/quic/session.cc
 @@ -31,6 +31,7 @@
@@ -369,6 +351,7 @@
    Debug(this, "Session is receiving datagram of size %zu", datalen);
    memcpy(backing->Data(), data, datalen);
    STAT_INCREMENT(Stats, datagrams_received);
+
 
 --- a/src/quic/streams.cc
 +++ b/src/quic/streams.cc
@@ -390,6 +373,7 @@
    inbound_->append(DataQueue::CreateInMemoryEntryFromBackingStore(
        std::move(backing), 0, len));
 
+
 --- a/src/quic/tlscontext.cc
 +++ b/src/quic/tlscontext.cc
 @@ -17,6 +17,7 @@
@@ -409,6 +393,7 @@
        auto data = reinterpret_cast<unsigned char*>(ticket->Data());
        if (i2d_SSL_SESSION(sess, &data) > 0) {
          session.EmitSessionTicket(Store(std::move(ticket), size));
+
 
 --- a/src/quic/transportparams.cc
 +++ b/src/quic/transportparams.cc
@@ -430,51 +415,6 @@
    auto ret = ngtcp2_transport_params_encode_versioned(
        static_cast<uint8_t*>(result->Data()), size, version, &params_);
 
---- a/src/stream_base.cc
-+++ b/src/stream_base.cc
-@@ -244,7 +244,7 @@ int StreamBase::Writev(const FunctionCallbackInfo<Value>& args) {
-   std::unique_ptr<BackingStore> bs;
-   if (storage_size > 0) {
-     NoArrayBufferZeroFillScope no_zero_fill_scope(env->isolate_data());
--    bs = ArrayBuffer::NewBackingStore(isolate, storage_size);
-+    bs = node::Buffer::CreateBackingStore(isolate, nullptr, storage_size, nullptr, nullptr);
-   }
- 
-   offset = 0;
-@@ -399,13 +399,13 @@ int StreamBase::WriteString(const FunctionCallbackInfo<Value>& args) {
-   if (try_write) {
-     // Copy partial data
-     NoArrayBufferZeroFillScope no_zero_fill_scope(env->isolate_data());
--    bs = ArrayBuffer::NewBackingStore(isolate, buf.len);
-+    bs = node::Buffer::CreateBackingStore(isolate, nullptr, buf.len, nullptr, nullptr);
-     memcpy(static_cast<char*>(bs->Data()), buf.base, buf.len);
-     data_size = buf.len;
-   } else {
-     // Write it
-     NoArrayBufferZeroFillScope no_zero_fill_scope(env->isolate_data());
--    bs = ArrayBuffer::NewBackingStore(isolate, storage_size);
-+      bs = node::Buffer::CreateBackingStore(isolate, nullptr, storage_size, nullptr, nullptr);
-     data_size = StringBytes::Write(isolate,
-                                    static_cast<char*>(bs->Data()),
-                                    storage_size,
-@@ -707,7 +707,7 @@ void EmitToJSStreamListener::OnStreamRead(ssize_t nread, const uv_buf_t& buf_) {
-   CHECK_LE(static_cast<size_t>(nread), bs->ByteLength());
-   if (static_cast<size_t>(nread) != bs->ByteLength()) {
-     std::unique_ptr<BackingStore> old_bs = std::move(bs);
--    bs = ArrayBuffer::NewBackingStore(isolate, nread);
-+    bs = node::Buffer::CreateBackingStore(isolate, nullptr, nread, nullptr, nullptr);
-     memcpy(static_cast<char*>(bs->Data()),
-            static_cast<char*>(old_bs->Data()),
-            nread);
-@@ -818,7 +818,7 @@ StreamResource::~StreamResource() {
-   while (listener_ != nullptr) {
-     StreamListener* listener = listener_;
-     listener->OnStreamDestroy();
--    // Remove the listener if it didn’t remove itself. This makes the logic
-+    // Remove the listener if it didn't remove itself. This makes the logic
-     // in `OnStreamDestroy()` implementations easier, because they
-     // may call generic cleanup functions which can just remove the
-     // listener unconditionally.
 
 --- a/src/udp_wrap.cc
 +++ b/src/udp_wrap.cc
@@ -492,6 +432,7 @@
      memcpy(static_cast<char*>(bs->Data()),
             static_cast<char*>(old_bs->Data()),
             nread);
+
 
 --- a/src/crypto/crypto_random.cc
 +++ b/src/crypto/crypto_random.cc
@@ -512,6 +453,7 @@
    CHECK_EQ(size,
             BignumPointer::EncodePaddedInto(
                 params.prime.get(),
+
 
 --- a/src/crypto/crypto_rsa.cc
 +++ b/src/crypto/crypto_rsa.cc
@@ -534,6 +476,7 @@
    }
    CHECK_EQ(BignumPointer::EncodePaddedInto(
                 e,
+
 
 --- a/src/crypto/crypto_sig.cc
 +++ b/src/crypto/crypto_sig.cc
@@ -576,6 +519,7 @@
    }
    if (!ExtractP1363(static_cast<unsigned char*>(signature->Data()),
                      static_cast<unsigned char*>(buf->Data()),
+
 
 --- a/src/crypto/crypto_tls.cc
 +++ b/src/crypto/crypto_tls.cc
@@ -634,6 +578,7 @@
  
    ByteSource context;
 
+
 --- a/src/crypto/crypto_util.cc
 +++ b/src/crypto/crypto_util.cc
 @@ -333,11 +333,12 @@ ByteSource& ByteSource::operator=(ByteSource&& other) noexcept {
@@ -671,6 +616,7 @@
            len,
            [](void* data, size_t len, void* deleter_data) {
 
+
 --- a/src/crypto/crypto_util.h
 +++ b/src/crypto/crypto_util.h
 @@ -241,7 +241,7 @@ class ByteSource {
@@ -681,7 +627,8 @@
 +  std::unique_ptr<v8::BackingStore> ReleaseToBackingStore(Environment* env);
  
    v8::Local<v8::ArrayBuffer> ToArrayBuffer(Environment* env);
- 
+
+
 --- a/src/crypto/crypto_x509.cc
 +++ b/src/crypto/crypto_x509.cc
 @@ -9,6 +9,7 @@
@@ -712,6 +659,7 @@
  
    unsigned char* serialized = reinterpret_cast<unsigned char*>(bs->Data());
 
+
 --- a/src/encoding_binding.cc
 +++ b/src/encoding_binding.cc
 @@ -4,6 +4,7 @@
@@ -730,4 +678,55 @@
 +        node::Buffer::CreateBackingStore(isolate, nullptr, length, nullptr, nullptr);
  
      CHECK(bs);
+
+
+--- a/src/env.cc
++++ b/src/env.cc
+@@ -750,7 +750,7 @@ void Environment::add_refs(int64_t diff) {
+ uv_buf_t Environment::allocate_managed_buffer(const size_t suggested_size) {
+   NoArrayBufferZeroFillScope no_zero_fill_scope(isolate_data());
+   std::unique_ptr<v8::BackingStore> bs =
+-      v8::ArrayBuffer::NewBackingStore(isolate(), suggested_size);
++      node::Buffer::CreateBackingStore(isolate(), nullptr, suggested_size, nullptr, nullptr);
+   uv_buf_t buf = uv_buf_init(static_cast<char*>(bs->Data()), bs->ByteLength());
+   released_allocated_buffers_.emplace(buf.base, std::move(bs));
+   return buf;
+
+
+--- a/src/stream_base.cc
++++ b/src/stream_base.cc
+@@ -244,7 +244,7 @@ int StreamBase::Writev(const FunctionCallbackInfo<Value>& args) {
+   std::unique_ptr<BackingStore> bs;
+   if (storage_size > 0) {
+     NoArrayBufferZeroFillScope no_zero_fill_scope(env->isolate_data());
+-    bs = ArrayBuffer::NewBackingStore(isolate, storage_size);
++    bs = node::Buffer::CreateBackingStore(isolate, nullptr, storage_size, nullptr, nullptr);
+   }
  
+   offset = 0;
+@@ -399,13 +399,13 @@ int StreamBase::WriteString(const FunctionCallbackInfo<Value>& args) {
+   if (try_write) {
+     // Copy partial data
+     NoArrayBufferZeroFillScope no_zero_fill_scope(env->isolate_data());
+-    bs = ArrayBuffer::NewBackingStore(isolate, buf.len);
++    bs = node::Buffer::CreateBackingStore(isolate, nullptr, buf.len, nullptr, nullptr);
+     memcpy(static_cast<char*>(bs->Data()), buf.base, buf.len);
+     data_size = buf.len;
+   } else {
+     // Write it
+     NoArrayBufferZeroFillScope no_zero_fill_scope(env->isolate_data());
+-    bs = ArrayBuffer::NewBackingStore(isolate, storage_size);
++      bs = node::Buffer::CreateBackingStore(isolate, nullptr, storage_size, nullptr, nullptr);
+     data_size = StringBytes::Write(isolate,
+                                    static_cast<char*>(bs->Data()),
+                                    storage_size,
+@@ -707,7 +707,7 @@ void EmitToJSStreamListener::OnStreamRead(ssize_t nread, const uv_buf_t& buf_) {
+   CHECK_LE(static_cast<size_t>(nread), bs->ByteLength());
+   if (static_cast<size_t>(nread) != bs->ByteLength()) {
+     std::unique_ptr<BackingStore> old_bs = std::move(bs);
+-    bs = ArrayBuffer::NewBackingStore(isolate, nread);
++    bs = node::Buffer::CreateBackingStore(isolate, nullptr, nread, nullptr, nullptr);
+     memcpy(static_cast<char*>(bs->Data()),
+            static_cast<char*>(old_bs->Data()),
+            nread);
+

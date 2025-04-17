@@ -112,72 +112,38 @@ async function patchFile(file, patchFile) {
 }
 
 // Helper function to apply a patch to a file's content
-async function applyPatch(fileContent, patch) {
+async function applyOnePatch(fileContent, patch) {
   const patchDiff = diff.parsePatch(patch);
   const patchedContent = diff.applyPatch(fileContent, patchDiff[0]);
   return patchedContent;
 }
 
-// Function to patch multiple files
+// Function to patch multiple files using a patch file containing multiple patches
 async function patchMultipleFiles(baseDir, patchFile) {
-  try {
-    // Read the patch file asynchronously
-    let patchData = await fsPromises.readFile(patchFile, 'utf8');
+  let patchData = await fsPromises.readFile(patchFile, 'utf8');
 
-    // Normalize line endings (convert all \r\n to \n)
-    patchData = patchData.replace(/\r\n/g, '\n');
+  // Normalize line endings (convert all \r\n to \n). This is necessary for the Windows builds.
+  patchData = patchData.replace(/\r\n/g, '\n');
 
-    // Split the patch data into individual patches (by looking for '--- ' to split the diffs)
-    const patches = patchData.split(/\n(?=--- )/); // This will split at every `--- ` line
+  // Split the patch data into individual patches (by looking for '--- ' to split the diffs)
+  // This will split at every `--- ` line
+  const patches = patchData.split(/\n(?=--- )/);
 
-    console.log(`Total patches found: ${patches.length}`);
+  console.log(`Total ${patches.length} patches found in ${patchFile}`);
 
-    patches.forEach(async (patch, index) => {
-      if (patch.trim()) {
-        try {
-          console.log(`Processing patch at index ${index}`);
-
-          // Split the patch into lines
-          const patchLines = patch.split('\n');
-
-          // Debugging: log first few lines of the patch content
-          console.log(`Patch content at index ${index}: ${patchLines.slice(0, 5).join('\n')}`);
-
-          // Extract file path from the first line
-          const filePathMatch = patchLines[0].split(' ')[1]; // Extract file path from the first line of the patch
-
-          if (!filePathMatch) {
-            console.error(`Skipping patch at index ${index}: No file path found`);
-            return;
-          }
-
-          // Remove the 'a/' or 'b/' prefix from the file path
-          const filePath = filePathMatch.trim().slice(2); 
-          const fullFilePath = path.join(baseDir, filePath);
-
-          // Read the file content asynchronously
-          try {
-            const fileContent = await fsPromises.readFile(fullFilePath, 'utf8');
-            // Apply the patch
-            const newContent = await applyPatch(fileContent, patch);
-            // Write the patched content back to the file asynchronously
-            await fsPromises.writeFile(fullFilePath, newContent, 'utf8');
-            console.log(`Patched file: ${fullFilePath}`);
-          } catch (err) {
-            console.error(`Failed to read or apply patch to file ${fullFilePath}:`, err);
-            throw new Error('Patch application failed, stopping the process.');
-          }
-        } catch (err) {
-          console.error(`Error processing patch at index ${index}:`, err);
-        }
-      } else {
-        console.warn(`Skipping empty or malformed patch at index ${index}`);
-      }
-    });
-  } catch (error) {
-    console.error('Error while applying patches:', error);
-    throw new Error('Patching process halted due to error.');
-  }
+  patches.forEach(async (patch, index) => {
+    // Split the patch into lines
+    const patchLines = patch.split('\n');
+    // Extract file path from the first line
+    const filePathMatch = patchLines[0].split(' ')[1];
+    // Remove the 'a/' or 'b/' prefix from the file path
+    const filePath = filePathMatch.trim().slice(2);
+    const fullFilePath = path.join(baseDir, filePath);
+    const fileContent = await fsPromises.readFile(fullFilePath, 'utf8');
+    const newContent = await applyOnePatch(fileContent, patch);
+    await fsPromises.writeFile(fullFilePath, newContent, 'utf8');
+    console.log(`Patched file: ${fullFilePath}`);
+  });
 }
 
 function fetch(url, headers) {
