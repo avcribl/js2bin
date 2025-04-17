@@ -82,7 +82,7 @@ function runCommand(command, args = [], cwd = undefined, env = undefined, verbos
   });
 }
 
-async function patchFile(file, patchFile) {
+async function patchFile1(file, patchFile) {
   if(!fs.existsSync(patchFile)) return; // noop
   await new Promise((resolve, reject) => {
     const proc = spawn(
@@ -110,6 +110,48 @@ async function patchFile(file, patchFile) {
     );
   });
 }
+
+
+async function patchFile(baseDir, patchFile) {
+  if (!fs.existsSync(patchFile)) return; // noop if the patch file doesn't exist
+
+  // Use `patch` to apply the multi-patch file
+  await new Promise((resolve, reject) => {
+    const proc = spawn(
+      'patch',
+      [
+        '-uN', // Unified patch format
+        '-p1', // Adjust the file path by stripping leading directories
+        // The `patch` command will automatically handle all file patches in the patch file
+      ],
+      {
+        cwd: baseDir, // Apply the patches in the provided directory (baseDir)
+        stdio: [
+          null, // No input for patch
+          'inherit', // Output to the terminal
+          'inherit', // Error output to the terminal
+        ],
+      }
+    );
+
+    proc.once('exit', (code) => {
+      if (code !== 0) {
+        return reject(new Error(`Failed to patch with patch file ${patchFile}. Exit code: ${code}`));
+      }
+      return resolve();
+    });
+
+    proc.once('error', reject);
+
+    // Pass the patch file through stdin of the patch process
+    pipeline(
+      fs.createReadStream(patchFile),
+      proc.stdin,
+      (err) => (err ? reject(err) : undefined)
+    );
+  });
+}
+
 
 // Helper function to apply a patch to a file's content
 async function applyOnePatch(fileContent, patch) {
@@ -296,5 +338,6 @@ module.exports = {
   copyFileAsync,
   renameAsync,
   patchFile,
-  patchMultipleFiles
+  patchMultipleFiles,
+  // patchFiles
 };

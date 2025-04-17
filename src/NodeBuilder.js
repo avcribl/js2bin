@@ -1,5 +1,4 @@
-
-const { log, download, upload, fetch, mkdirp, rmrf, copyFileAsync, runCommand, renameAsync, patchFile, patchMultipleFiles } = require('./util');
+const { log, download, upload, fetch, mkdirp, rmrf, copyFileAsync, runCommand, renameAsync, patchFile, patchMultipleFiles, patchFiles } = require('./util');
 const { gzipSync, createGunzip } = require('zlib');
 const { join, dirname, basename, parse, resolve } = require('path');
 const fs = require('fs');
@@ -199,35 +198,38 @@ class NodeJsBuilder {
 
   async patchThirdPartyMain() {
     await patchFile(
-      this.nodePath('lib', 'internal', 'main', 'run_third_party_main.js'),
+      this.nodeSrcDir,
       join(this.patchDir, 'run_third_party_main.js.patch'));
     await patchFile(
-      this.nodePath('src', 'node.cc'),
+      this.nodeSrcDir,
       join(this.patchDir, 'node.cc.patch'));
     await patchFile(
-      this.nodePath('deps', 'uv', 'src', 'win', 'fs-event.c'),
+      this.nodeSrcDir,
       join(this.patchDir, 'fs-event.c.patch'));
   }
 
   async patchNodeCompileIssues() {
     await patchFile(
-      this.nodePath('node.gyp'),
+      this.nodeSrcDir,
       join(this.patchDir, 'node.gyp.patch'));
 
     if (isWindows) {
-      await patchFile(this.nodePath('vcbuild.bat'), join(this.patchDir, 'vcbuild.bat.patch'));
-      await patchFile(this.nodePath('deps', 'v8', 'include', 'v8config.h'), join(this.patchDir, 'v8config.patch'));
+      await patchFile(this.nodeSrcDir, join(this.patchDir, 'vcbuild.bat.patch'));
+      await patchFile(this.nodeSrcDir, join(this.patchDir, 'v8config.patch'));
       // The following patches fix the memory leak when using pointer compression
       // They are fixing both Linux and Windows, however, we only apply them to Windows to keep the blast radius small
-      await patchFile(this.nodePath('configure.py'), join(this.patchDir, 'configure.py.patch'));
-      await patchFile(this.nodePath('tools', 'v8_gypfiles', 'features.gypi'), join(this.patchDir, 'features.gypi.patch'));
-      await patchFile(this.nodePath('src', 'node_buffer.cc'), join(this.patchDir, 'node_buffer.cc.patch'));
-      await patchMultipleFiles(this.nodeSrcDir, join(this.patchDir, 'v8_backing_store_callers.patch'));
+      await patchFile(this.nodeSrcDir, join(this.patchDir, 'configure.py.patch'));
+      await patchFile(this.nodeSrcDir, join(this.patchDir, 'features.gypi.patch'));
+      await patchFile(this.nodeSrcDir, join(this.patchDir, 'node_buffer.cc.patch'));
+      await patchFile(this.nodeSrcDir, join(this.patchDir, 'v8_backing_store_callers.patch'));
+      // await patchMultipleFiles(this.nodeSrcDir, join(this.patchDir, 'v8_backing_store_callers.patch'));
     }
 
-    isLinux && await patchFile(
-      this.nodePath('deps','cares','config','linux','ares_config.h'),
-      join(this.patchDir, 'no_rand_on_glibc.patch'));
+    if (isLinux) {
+      await patchFile(
+        this.nodeSrcDir,
+        join(this.patchDir, 'no_rand_on_glibc.patch'));
+    }
   }
 
   async applyPatches() {
