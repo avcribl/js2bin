@@ -120,6 +120,7 @@ async function applyOnePatch(fileContent, patch) {
 
 // Function to patch multiple files using a patch file containing multiple patches
 async function patchMultipleFiles(baseDir, patchFile) {
+  if (!fs.existsSync(patchFile)) return; // noop
   let patchData = await fsPromises.readFile(patchFile, 'utf8');
 
   // Normalize line endings (convert all \r\n to \n). This is necessary for the Windows builds.
