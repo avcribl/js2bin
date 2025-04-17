@@ -1,5 +1,3 @@
-diff --git a/tools/v8_gypfiles/features.gypi b/tools/v8_gypfiles/features.gypi
-index 7940234cd6..ccc08be089 100644
 --- a/tools/v8_gypfiles/features.gypi
 +++ b/tools/v8_gypfiles/features.gypi
 @@ -157,6 +157,9 @@
