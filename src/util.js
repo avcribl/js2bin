@@ -89,7 +89,7 @@ async function patchFile(baseDir, patchFile) {
         '-p1' // Adjust the file path by stripping leading directories (a/ and b/)
       ],
       {
-        cwd: baseDir, // Apply the patches in the provided directory (baseDir)
+        cwd: baseDir, // Apply the patches in the provided directory
         stdio: [
           null,
           'inherit',
