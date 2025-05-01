@@ -1,0 +1,12 @@
+--- a/lib/internal/streams/state.js
++++ b/lib/internal/streams/state.js
+@@ -9,7 +9,8 @@ const { validateInteger } = require('internal/validators');
+ const { ERR_INVALID_ARG_VALUE } = require('internal/errors').codes;
+ 
+ // TODO (fix): For some reason Windows CI fails with bigger hwm.
+-let defaultHighWaterMarkBytes = process.platform === 'win32' ? 16 * 1024 : 64 * 1024;
++// let defaultHighWaterMarkBytes = process.platform === 'win32' ? 16 * 1024 : 64 * 1024;
++let defaultHighWaterMarkBytes = 16 * 1024;
+ let defaultHighWaterMarkObjectMode = 16;
+ 
+ function highWaterMarkFrom(options, isDuplex, duplexKey) {
