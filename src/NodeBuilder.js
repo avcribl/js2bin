@@ -1,4 +1,3 @@
-
 const { log, download, upload, fetch, mkdirp, rmrf, copyFileAsync, runCommand, renameAsync, patchFile } = require('./util');
 const { gzipSync, createGunzip } = require('zlib');
 const { join, dirname, basename, parse, resolve } = require('path');
@@ -207,14 +206,14 @@ class NodeJsBuilder {
     await patchFile(this.nodeSrcDir, join(this.patchDir, 'node.gyp.patch'));
 
     if (isWindows) {
-      await patchFile(this.nodeSrcDir, join(this.patchDir, 'vcbuild.bat.patch'));
-      await patchFile(this.nodeSrcDir, join(this.patchDir, 'v8config.patch'));
+      // await patchFile(this.nodeSrcDir, join(this.patchDir, 'vcbuild.bat.patch'));
+      // await patchFile(this.nodeSrcDir, join(this.patchDir, 'v8config.patch'));
       // The following patches fix the memory leak when using pointer compression
       // They are fixing both Linux and Windows, however, we only apply them to Windows to keep the blast radius small
-      await patchFile(this.nodeSrcDir, join(this.patchDir, 'configure.py.patch'));
-      await patchFile(this.nodeSrcDir, join(this.patchDir, 'features.gypi.patch'));
-      await patchFile(this.nodeSrcDir, join(this.patchDir, 'node_buffer.cc.patch'));
-      await patchFile(this.nodeSrcDir, join(this.patchDir, 'v8_backing_store_callers.patch'));
+      // await patchFile(this.nodeSrcDir, join(this.patchDir, 'configure.py.patch'));
+      // await patchFile(this.nodeSrcDir, join(this.patchDir, 'features.gypi.patch'));
+      // await patchFile(this.nodeSrcDir, join(this.patchDir, 'node_buffer.cc.patch'));
+      // await patchFile(this.nodeSrcDir, join(this.patchDir, 'v8_backing_store_callers.patch'));
     }
 
     if (isLinux) {
@@ -237,27 +236,53 @@ class NodeJsBuilder {
 
   buildInContainer(ptrCompression) {
     const containerTag = `cribl/js2bin-builder:${this.builderImageVersion}`;
+    // const containerTag = `cribl-stream9:${this.builderImageVersion}`;
+    // return this.buildDockerImage('linux/amd64')
+      // .then(() => runCommand(
     return runCommand(
-        'docker', ['run',
-          '-v', `${process.cwd()}:/js2bin/`,
-          '-t', containerTag,
-          '/bin/bash', '-c',
-        `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
-        ]
-      );
-  }
-
-  buildInContainerNonX64(arch, ptrCompression) {
-    const containerTag = `cribl/js2bin-builder:${this.builderImageVersion}-nonx64`;
-    return runCommand(
-        'docker', ['run',
-          '--platform', arch,
+      'docker', ['run',
           '-v', `${process.cwd()}:/js2bin/`,
           '-t', containerTag,
           '/bin/bash', '-c',
           `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
         ]
       );
+  }
+            // `source /opt/rh/gcc-toolset-12/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
+
+  buildInContainerNonX64(arch, ptrCompression) {
+    const containerTag = `cribl/js2bin-builder:${this.builderImageVersion}-nonx64`;
+    // const containerTag = `cribl-stream9:${this.builderImageVersion}-nonx64`;
+    // return this.buildDockerImage(arch)
+      // .then(() => runCommand(
+    return runCommand(
+      'docker', ['run',
+          '--platform', arch,
+          '-v', `${process.cwd()}:/js2bin/`,
+          '-t', containerTag,
+          '/bin/bash', '-c',
+          `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
+      ]
+    );
+  }
+
+  buildDockerImage(arch) {
+    const tag = arch === 'linux/amd64'
+      ? `cribl-stream9:${this.builderImageVersion}`
+      : `cribl-stream9:${this.builderImageVersion}-nonx64`;
+    
+    const dockerfileName = arch === 'linux/amd64' ? 'Dockerfile.stream9' : 'Dockerfile.stream9.arm64';
+    const dockerfilePath = join(dirname(this.srcDir), dockerfileName);
+    const buildContext = dirname(this.srcDir);
+    
+    return runCommand(
+      'docker', ['build',
+        '--platform', arch,
+        '-t', tag,
+        '-f', dockerfilePath,
+        buildContext
+      ]
+    );
   }
 
   // 1. download node source
@@ -267,9 +292,11 @@ class NodeJsBuilder {
   // 5. kick off ./configure & build
   buildFromSource(uploadBuild, cache, container, arch, ptrCompression) {
     const makeArgs = isWindows ? ['x64', 'no-cctest'] : [`-j${os.cpus().length}`];
+    // const makeArgs = isWindows ? ['x64', 'no-cctest', 'clang-cl'] : [`-j${os.cpus().length}`];
     const configArgs = [];
     if(ptrCompression) {
-      if(isWindows) makeArgs.push('v8_ptr_compress');
+      // if(isWindows) makeArgs.push('v8_ptr_compress');
+      if(isWindows) log('skipping v8_ptr_compress for windows');
       else          configArgs.push('--experimental-enable-pointer-compression');
     }
     return this.printDiskUsage()
