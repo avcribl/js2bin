@@ -1,0 +1,37 @@
+FROM centos:8
+
+RUN sed -i 's/mirror.centos.org/vault.centos.org/g' /etc/yum.repos.d/*.repo && \
+    sed -i 's/^#.*baseurl=http/baseurl=http/g' /etc/yum.repos.d/*.repo && \
+    sed -i 's/^mirrorlist=http/#mirrorlist=http/g' /etc/yum.repos.d/*.repo && \
+    sed -i 's|/centos/|/altarch/|g' /etc/yum.repos.d/*.repo
+# Update base packages and install development tools
+RUN yum groupinstall -y "Development Tools" && \
+    yum install -y \
+        wget \
+        gcc \
+        gcc-c++ \
+        gmp-devel \
+        mpfr-devel \
+        libmpc-devel \
+        zlib-devel \
+        make \
+        unzip \
+        tar \
+        bzip2 && \
+    yum clean all
+
+# Download and build GCC 12
+WORKDIR /usr/local/src
+RUN wget https://ftp.gnu.org/gnu/gcc/gcc-12.2.0/gcc-12.2.0.tar.gz && \
+    tar -xzf gcc-12.2.0.tar.gz && \
+    cd gcc-12.2.0 && \
+    ./contrib/download_prerequisites && \
+    mkdir build && cd build && \
+    ../configure --disable-multilib --enable-languages=c,c++ --prefix=/opt/gcc-12 && \
+    make -j$(nproc) && \
+    make install
+
+# Set environment for gcc 12
+ENV PATH="/opt/gcc-12/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/opt/gcc-12/lib64:${LD_LIBRARY_PATH}"
+

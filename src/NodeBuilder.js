@@ -1,4 +1,3 @@
-
 const { log, download, upload, fetch, mkdirp, rmrf, copyFileAsync, runCommand, renameAsync, patchFile } = require('./util');
 const { gzipSync, createGunzip } = require('zlib');
 const { join, dirname, basename, parse, resolve } = require('path');
@@ -86,23 +85,97 @@ class NodeJsBuilder {
     return arch in prettyArch ? prettyArch[arch] : arch;
   }
 
+  async createAndCacheHeaders() {
+    if (isWindows || process.arch !== 'x64') {
+      return Promise.resolve();
+    }
+
+    // Create symlink for Python if needed
+    const pythonPath = '/usr/local/bin/python3';
+    const python39Path = '/usr/local/bin/python3.9';
+    if (fs.existsSync(pythonPath) && !fs.existsSync(python39Path)) {
+      await runCommand('ln', ['-s', pythonPath, python39Path]);
+    }
+
+    try {
+      await runCommand('which', ['python3.9']);
+    } catch (e) {
+      log('python3.9 not found');
+      return Promise.resolve();
+    }
+
+    // Use tools/install.py directly to install headers
+    const headersDir = `node-v${this.version}`;
+    await runCommand('python3.9', [
+      'tools/install.py',
+      'install',
+      '--headers-only',
+      '--dest-dir=' + headersDir,
+      '--prefix=/'
+    ], this.nodeSrcDir);
+    
+    // Remove symlinks (similar to Makefile's find command)
+    // const fullHeadersDir = join(this.nodeSrcDir, '--headers-only--dest-dir=' + headersDir);
+    const fullHeadersDir = join(this.nodeSrcDir, headersDir);
+    await runCommand('find', [fullHeadersDir, '-type', 'l', '-exec', 'rm', '{}', ';']);
+    
+    // Move include directory to cache
+    const includeDir = join(fullHeadersDir, 'include');
+    const cacheIncludeDir = join(this.cacheDir, 'include');
+
+    const files2 = await fs.promises.readdir(includeDir);
+    log('Files in src/include:', files2);
+    
+    // Ensure cache directory exists
+    await mkdirp(this.cacheDir);
+    
+    // Remove existing include directory if it exists
+    if (fs.existsSync(cacheIncludeDir)) {
+      await runCommand('rm', ['-rf', cacheIncludeDir]);
+    }
+    
+    // Move the include directory
+    await runCommand('mv', [includeDir, this.cacheDir]);
+
+    // Create tarball of headers
+    const tarFile = `${this.version}-headers.tar`;
+    await runCommand('tar', ['-cf', tarFile, 'include'], this.cacheDir);
+    
+    
+    // Clean up the source directory
+    // await runCommand('rm', ['-rf', join(this.nodeSrcDir, '--headers-only--dest-dir=' + headersDir)]);
+    await runCommand('rm', ['-rf', join(this.nodeSrcDir, headersDir)]);
+    
+    const files3 = await fs.promises.readdir(this.cacheDir);
+    log('Files in cache:', files3);
+    // List contents of cache directory
+    const files = await fs.promises.readdir(join(cacheIncludeDir, 'node'));
+    log('Files in cache/include/node:', files);
+  }
+
   downloadExpandNodeSource() {
     const url = `https://nodejs.org/dist/v${this.version}/node-v${this.version}.tar.gz`;
     if (fs.existsSync(this.nodePath('configure'))) {
       log(`node version=${this.version} already downloaded and expanded, using it`);
       return Promise.resolve();
     }
+
+    if (this.version.split('.')[0] >= 15) {
+      return rmrf(this.nodeSrcDir)
+        .then(() => runCommand('git', ['clone', 'https://github.com/nodejs/node.git', this.nodeSrcDir]))
+        .then(() => runCommand('git', ['checkout', 'd9aa33fdbf015ee2aa799c106b5039d4675f90cf'], this.nodeSrcDir))
+        .then(() => this.applyPatches());
+    }
+
     return download(url, this.nodeSrcFile)
       .then(() => new Promise((resolve, reject) => {
         log(`expanding node source, file=${this.nodeSrcFile} ...`);
         fs.createReadStream(this.nodeSrcFile)
           .pipe(createGunzip())
-          .pipe(tar.extract(dirname(this.nodeSrcFile)))
+          .pipe(tar.extract(dirname(this.nodeSrcDir)))
           .on('error', reject)
           .on('finish', resolve);
-      })
-      )
-      .then(() => this.version.split('.')[0] >= 15 ? this.applyPatches() : Promise.resolve())
+      }));
   }
 
   downloadCachedBuild(platform, arch, placeHolderSizeMB) {
@@ -200,21 +273,21 @@ class NodeJsBuilder {
   async patchThirdPartyMain() {
     await patchFile(this.nodeSrcDir, join(this.patchDir, 'run_third_party_main.js.patch'));
     await patchFile(this.nodeSrcDir, join(this.patchDir, 'node.cc.patch'));
-    await patchFile(this.nodeSrcDir, join(this.patchDir, 'fs-event.c.patch'));
+    // await patchFile(this.nodeSrcDir, join(this.patchDir, 'fs-event.c.patch'));
   }
 
   async patchNodeCompileIssues() {
     await patchFile(this.nodeSrcDir, join(this.patchDir, 'node.gyp.patch'));
 
     if (isWindows) {
-      await patchFile(this.nodeSrcDir, join(this.patchDir, 'vcbuild.bat.patch'));
-      await patchFile(this.nodeSrcDir, join(this.patchDir, 'v8config.patch'));
+      // await patchFile(this.nodeSrcDir, join(this.patchDir, 'vcbuild.bat.patch'));
+      // await patchFile(this.nodeSrcDir, join(this.patchDir, 'v8config.patch'));
       // The following patches fix the memory leak when using pointer compression
       // They are fixing both Linux and Windows, however, we only apply them to Windows to keep the blast radius small
-      await patchFile(this.nodeSrcDir, join(this.patchDir, 'configure.py.patch'));
-      await patchFile(this.nodeSrcDir, join(this.patchDir, 'features.gypi.patch'));
-      await patchFile(this.nodeSrcDir, join(this.patchDir, 'node_buffer.cc.patch'));
-      await patchFile(this.nodeSrcDir, join(this.patchDir, 'v8_backing_store_callers.patch'));
+      // await patchFile(this.nodeSrcDir, join(this.patchDir, 'configure.py.patch'));
+      // await patchFile(this.nodeSrcDir, join(this.patchDir, 'features.gypi.patch'));
+      // await patchFile(this.nodeSrcDir, join(this.patchDir, 'node_buffer.cc.patch'));
+      // await patchFile(this.nodeSrcDir, join(this.patchDir, 'v8_backing_store_callers.patch'));
     }
 
     if (isLinux) {
@@ -237,27 +310,53 @@ class NodeJsBuilder {
 
   buildInContainer(ptrCompression) {
     const containerTag = `cribl/js2bin-builder:${this.builderImageVersion}`;
+    // const containerTag = `cribl-stream9:${this.builderImageVersion}`;
+    // return this.buildDockerImage('linux/amd64')
+      // .then(() => runCommand(
     return runCommand(
-        'docker', ['run',
-          '-v', `${process.cwd()}:/js2bin/`,
-          '-t', containerTag,
-          '/bin/bash', '-c',
-        `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
-        ]
-      );
-  }
-
-  buildInContainerNonX64(arch, ptrCompression) {
-    const containerTag = `cribl/js2bin-builder:${this.builderImageVersion}-nonx64`;
-    return runCommand(
-        'docker', ['run',
-          '--platform', arch,
+      'docker', ['run',
           '-v', `${process.cwd()}:/js2bin/`,
           '-t', containerTag,
           '/bin/bash', '-c',
           `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
         ]
       );
+  }
+            // `source /opt/rh/gcc-toolset-12/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
+
+  buildInContainerNonX64(arch, ptrCompression) {
+    const containerTag = `cribl/js2bin-builder:${this.builderImageVersion}-nonx64`;
+    // const containerTag = `cribl-stream9:${this.builderImageVersion}-nonx64`;
+    // return this.buildDockerImage(arch)
+      // .then(() => runCommand(
+    return runCommand(
+      'docker', ['run',
+          '--platform', arch,
+          '-v', `${process.cwd()}:/js2bin/`,
+          '-t', containerTag,
+          '/bin/bash', '-c',
+          `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
+      ]
+    );
+  }
+
+  buildDockerImage(arch) {
+    const tag = arch === 'linux/amd64'
+      ? `cribl-stream9:${this.builderImageVersion}`
+      : `cribl-stream9:${this.builderImageVersion}-nonx64`;
+    
+    const dockerfileName = arch === 'linux/amd64' ? 'Dockerfile.stream9' : 'Dockerfile.stream9.arm64';
+    const dockerfilePath = join(dirname(this.srcDir), dockerfileName);
+    const buildContext = dirname(this.srcDir);
+    
+    return runCommand(
+      'docker', ['build',
+        '--platform', arch,
+        '-t', tag,
+        '-f', dockerfilePath,
+        buildContext
+      ]
+    );
   }
 
   // 1. download node source
@@ -267,9 +366,11 @@ class NodeJsBuilder {
   // 5. kick off ./configure & build
   buildFromSource(uploadBuild, cache, container, arch, ptrCompression) {
     const makeArgs = isWindows ? ['x64', 'no-cctest'] : [`-j${os.cpus().length}`];
+    // const makeArgs = isWindows ? ['x64', 'no-cctest', 'clang-cl'] : [`-j${os.cpus().length}`];
     const configArgs = [];
     if(ptrCompression) {
-      if(isWindows) makeArgs.push('v8_ptr_compress');
+      // if(isWindows) makeArgs.push('v8_ptr_compress');
+      if(isWindows) log('skipping v8_ptr_compress for windows');
       else          configArgs.push('--experimental-enable-pointer-compression');
     }
     return this.printDiskUsage()
@@ -304,6 +405,7 @@ class NodeJsBuilder {
       })
       .then(() => this.uploadNodeBinary(undefined, uploadBuild, cache, arch, ptrCompression))
       .then(() => this.printDiskUsage())
+      .then(() => this.createAndCacheHeaders())
       // .then(() => this.cleanupBuild().catch(err => log(err)))
       .then(() => {
         log(`RESULTS: ${this.resultFile}`);
