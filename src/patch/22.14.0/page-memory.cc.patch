@@ -1,0 +1,91 @@
+--- a/deps/v8/src/heap/sweeper.cc
++++ b/deps/v8/src/heap/sweeper.cc
+@@ -267,8 +267,17 @@ void Sweeper::SweepingState<scope>::InitializeSweeping() {
+   DCHECK_IMPLIES(scope == Sweeper::SweepingScope::kMinor, v8_flags.minor_ms);
+   DCHECK_IMPLIES(scope == Sweeper::SweepingScope::kMinor,
+                  !sweeper_->heap_->ShouldReduceMemory());
+-  should_reduce_memory_ = (scope != Sweeper::SweepingScope::kMinor) &&
+-                          sweeper_->heap_->ShouldReduceMemory();
++  
++  if (run_count_ < 10 && (scope != Sweeper::SweepingScope::kMinor)) {
++    should_reduce_memory_ = true;
++    run_count_++;
++      v8::base::OS::PrintError("SweepingState: should_reduce_memory_ = %d run_count = %d\n", 
++                          should_reduce_memory_, run_count_);
++  } else {
++    should_reduce_memory_ = (scope != Sweeper::SweepingScope::kMinor) &&
++                           sweeper_->heap_->ShouldReduceMemory();
++  }
++  
+   trace_id_ =
+       reinterpret_cast<uint64_t>(sweeper_) ^
+       sweeper_->heap_->tracer()->CurrentEpoch(
+@@ -326,8 +335,11 @@ void Sweeper::SweepingState<scope>::FinishSweeping() {
+   // Sweeping jobs were already joined.
+   DCHECK(!HasValidJob());
+ 
++  v8::base::OS::PrintError("Memory reducer: should_reduce_memory_ = %d\n", should_reduce_memory_);
++
+   // Discard all pooled pages on memory-reducing GCs.
+   if (should_reduce_memory_) {
++    
+     sweeper_->heap_->memory_allocator()->pool()->ReleasePooledChunks();
+   }
+ 
+
+--- a/deps/v8/src/heap/sweeper.h
++++ b/deps/v8/src/heap/sweeper.h
+@@ -299,6 +299,7 @@ class Sweeper {
+     std::vector<ConcurrentSweeper> concurrent_sweepers_;
+     uint64_t trace_id_ = 0;
+     bool should_reduce_memory_ = false;
++    int run_count_ = 0;
+   };
+ 
+   Heap* const heap_;
+
+
+--- a/deps/v8/src/heap/heap.cc
++++ b/deps/v8/src/heap/heap.cc
+@@ -119,7 +119,7 @@
+ #include "src/tracing/trace-event.h"
+ #include "src/utils/utils-inl.h"
+ #include "src/utils/utils.h"
+-
++#include "src/base/platform/platform.h"  // For v8::base::OS
+ #ifdef V8_ENABLE_CONSERVATIVE_STACK_SCANNING
+ #include "src/heap/conservative-stack-visitor.h"
+ #endif  // V8_ENABLE_CONSERVATIVE_STACK_SCANNING
+@@ -1400,6 +1400,8 @@ void Heap::GarbageCollectionEpilogueInSafepoint(GarbageCollector collector) {
+ 
+     // Discard pooled pages for scavenger if needed.
+     if (ShouldReduceMemory()) {
++      v8::base::OS::PrintError("Memory reducer scavenge: should_reduce_memory_ = %d\n", ShouldReduceMemory());
++
+       memory_allocator_->pool()->ReleasePooledChunks();
+     }
+   }
+@@ -1670,6 +1672,7 @@ void Heap::PreciseCollectAllGarbage(GCFlags gc_flags,
+ }
+ 
+ void Heap::ReportExternalMemoryPressure() {
++
+   const GCCallbackFlags kGCCallbackFlagsForExternalMemory =
+       static_cast<GCCallbackFlags>(
+           kGCCallbackFlagSynchronousPhantomCallbackProcessing |
+@@ -3809,6 +3812,7 @@ bool Heap::HasHighFragmentation() {
+ }
+ 
+ bool Heap::ShouldOptimizeForMemoryUsage() {
++
+   const size_t kOldGenerationSlack = max_old_generation_size() / 8;
+   return v8_flags.optimize_for_size || isolate()->IsIsolateInBackground() ||
+          HighMemoryPressure() || !CanExpandOldGeneration(kOldGenerationSlack);
+@@ -4202,6 +4206,7 @@ void Heap::CheckMemoryPressure() {
+ }
+ 
+ void Heap::CollectGarbageOnMemoryPressure() {
++
+   const int kGarbageThresholdInBytes = 8 * MB;
+   const double kGarbageThresholdAsFractionOfTotalMemory = 0.1;
+   // This constant is the maximum response time in RAIL performance model.
