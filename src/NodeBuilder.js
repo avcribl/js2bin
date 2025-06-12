@@ -1,4 +1,3 @@
-
 const { log, download, upload, fetch, mkdirp, rmrf, copyFileAsync, runCommand, renameAsync, patchFile } = require('./util');
 const { gzipSync, createGunzip } = require('zlib');
 const { join, dirname, basename, parse, resolve } = require('path');
@@ -266,8 +265,11 @@ class NodeJsBuilder {
   // 4. process mainAppFile (gzip, base64 encode it) - could be a placeholder file
   // 5. kick off ./configure & build
   buildFromSource(uploadBuild, cache, container, arch, ptrCompression) {
-    const makeArgs = isWindows ? ['x64', 'no-cctest'] : [`-j${os.cpus().length}`];
-    const configArgs = [];
+    // const makeArgs = isWindows ? ['x64', 'no-cctest','i18n_arg'] : [`-j${os.cpus().length}`];
+    const makeArgs = isWindows ? ['x64', 'no-cctest', 'small-icu'] : [`-j${os.cpus().length}`];
+    const configArgs = ['--with-intl=small-icu'];
+    // const configArgs = ['--without-npm', '--without-corepack'];
+    // const configArgs = [];
     if(ptrCompression) {
       if(isWindows) makeArgs.push('v8_ptr_compress');
       else          configArgs.push('--experimental-enable-pointer-compression');
@@ -293,6 +295,9 @@ class NodeJsBuilder {
 
         if (!container) {
           const cfgMakeEnv = { ...process.env };
+          // cfgMakeEnv.CFLAGS = '-Os -ffunction-sections -fdata-sections';
+          // // cfgMakeEnv.LDFLAGS = '-Wl,--gc-sections -lrt';
+          // cfgMakeEnv.LDFLAGS = '-Wl,--gc-sections -Wl,--as-needed -lrt';
           cfgMakeEnv.LDFLAGS = '-lrt'; // needed for node 12 to be compiled with this old compiler https://github.com/nodejs/node/issues/30077#issuecomment-574535342
           return runCommand(this.configure, configArgs, this.nodeSrcDir, cfgMakeEnv)
             .then(() => runCommand(this.make, makeArgs, this.nodeSrcDir, cfgMakeEnv));
