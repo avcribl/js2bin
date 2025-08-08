@@ -15,4 +15,34 @@
    if (env->worker_context() != nullptr) {
      return StartExecution(env, "internal/main/worker_thread");
    }
-   
+
+--- a/lib/internal/streams/end-of-stream.js
++++ b/lib/internal/streams/end-of-stream.js
+@@ -65,9 +65,24 @@ function eos(stream, options, callback) {
+   }
+   validateFunction(callback, 'callback');
+   validateAbortSignal(options.signal, 'options.signal');
+-
+-  AsyncLocalStorage ??= require('async_hooks').AsyncLocalStorage;
+-  callback = once(AsyncLocalStorage.bind(callback));
++  
++  // Check if async hooks are enabled by checking if there are any active hooks
++  const { getHookArrays } = require('internal/async_hooks');
++  const [activeHooks] = getHookArrays();
++  const hasActiveHooks = activeHooks.length > 0;
++  
++  if (hasActiveHooks) {
++    // Only apply AsyncLocalStorage binding if async hooks are actually active
++    // This avoids the performance cost of creating AsyncResource instances
++    // when no async context tracking is active
++    AsyncLocalStorage ??= require('async_hooks').AsyncLocalStorage;
++
++    // Only bind if async hooks are active
++    callback = once(AsyncLocalStorage.bind(callback));
++  } else {
++    // No active async hooks, use regular once wrapper
++    callback = once(callback);
++  }
+ 
+   if (isReadableStream(stream) || isWritableStream(stream)) {
+     return eosWeb(stream, options, callback);   
