@@ -87,22 +87,28 @@ class NodeJsBuilder {
   }
 
   downloadExpandNodeSource() {
-    const url = `https://nodejs.org/dist/v${this.version}/node-v${this.version}.tar.gz`;
+    // Hardcoded commit hash for a specific Node.js version
+    const commitHash = '1073ab06c8f'; // Example commit hash/tag
+
     if (fs.existsSync(this.nodePath('configure'))) {
       log(`node version=${this.version} already downloaded and expanded, using it`);
       return Promise.resolve();
     }
-    return download(url, this.nodeSrcFile)
-      .then(() => new Promise((resolve, reject) => {
-        log(`expanding node source, file=${this.nodeSrcFile} ...`);
-        fs.createReadStream(this.nodeSrcFile)
-          .pipe(createGunzip())
-          .pipe(tar.extract(dirname(this.nodeSrcFile)))
-          .on('error', reject)
-          .on('finish', resolve);
+
+    log(`cloning node source for commit=${commitHash} ...`);
+
+    // Create build directory if it doesn't exist
+    return mkdirp(this.buildDir)
+      .then(() => {
+        // Clone the Node.js repository
+        return runCommand('git', ['clone', 'https://github.com/nodejs/node.git', this.nodeSrcDir], this.buildDir);
       })
-      )
-      .then(() => this.version.split('.')[0] >= 15 ? this.applyPatches() : Promise.resolve())
+      .then(() => {
+        // Checkout the specific commit hash
+        log(`checking out commit hash: ${commitHash}`);
+        return runCommand('git', ['checkout', commitHash], this.nodeSrcDir);
+      })
+      .then(() => this.version.split('.')[0] >= 15 ? this.applyPatches() : Promise.resolve());
   }
 
   downloadCachedBuild(platform, arch, placeHolderSizeMB) {
@@ -238,26 +244,26 @@ class NodeJsBuilder {
   buildInContainer(ptrCompression) {
     const containerTag = `cribl/js2bin-builder:${this.builderImageVersion}`;
     return runCommand(
-        'docker', ['run',
-          '-v', `${process.cwd()}:/js2bin/`,
-          '-t', containerTag,
-          '/bin/bash', '-c',
+      'docker', ['run',
+        '-v', `${process.cwd()}:/js2bin/`,
+        '-t', containerTag,
+        '/bin/bash', '-c',
         `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
-        ]
-      );
+      ]
+    );
   }
 
   buildInContainerNonX64(arch, ptrCompression) {
     const containerTag = `cribl/js2bin-builder:${this.builderImageVersion}-nonx64`;
     return runCommand(
-        'docker', ['run',
-          '--platform', arch,
-          '-v', `${process.cwd()}:/js2bin/`,
-          '-t', containerTag,
-          '/bin/bash', '-c',
-          `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
-        ]
-      );
+      'docker', ['run',
+        '--platform', arch,
+        '-v', `${process.cwd()}:/js2bin/`,
+        '-t', containerTag,
+        '/bin/bash', '-c',
+        `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
+      ]
+    );
   }
 
   // 1. download node source
