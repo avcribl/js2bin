@@ -217,7 +217,7 @@ class NodeJsBuilder {
   }
 
   async patchThirdPartyMain() {
-    await patchFile(this.nodeSrcDir, join(this.patchDir, 'run_third_party_main.js.patch'));
+    // await patchFile(this.nodeSrcDir, join(this.patchDir, 'run_third_party_main.js.patch'));
     await patchFile(this.nodeSrcDir, join(this.patchDir, 'node.cc.patch'));
   }
 
