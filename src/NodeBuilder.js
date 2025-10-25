@@ -229,12 +229,15 @@ class NodeJsBuilder {
       await patchFile(this.nodeSrcDir, join(this.patchDir, 'v8config.patch'));
       // The following patches fix the memory leak when using pointer compression
       // They are fixing both Linux and Windows, however, we only apply them to Windows to keep the blast radius small
-      await patchFile(this.nodeSrcDir, join(this.patchDir, 'configure.py.patch'));
-      await patchFile(this.nodeSrcDir, join(this.patchDir, 'node_buffer.cc.patch'));
-      await patchFile(this.nodeSrcDir, join(this.patchDir, 'v8_backing_store_callers.patch'));
+      // await patchFile(this.nodeSrcDir, join(this.patchDir, 'configure.py.patch'));
+      // await patchFile(this.nodeSrcDir, join(this.patchDir, 'node_buffer.cc.patch'));
+      // await patchFile(this.nodeSrcDir, join(this.patchDir, 'v8_backing_store_callers.patch'));
     }
 
     if (isLinux) {
+      await patchFile(this.nodeSrcDir, join(this.patchDir, 'configure.py.patch'));
+      await patchFile(this.nodeSrcDir, join(this.patchDir, 'node_buffer.cc.patch'));
+      await patchFile(this.nodeSrcDir, join(this.patchDir, 'v8_backing_store_callers.patch'));
       await patchFile(this.nodeSrcDir, join(this.patchDir, 'no_rand_on_glibc.patch'));
     }
   }
