@@ -1,37 +1,33 @@
-FROM centos:7
+FROM rockylinux:9
 
-# use Centos vault for downloading
-RUN sed -i 's/mirror.centos.org/vault.centos.org/g' /etc/yum.repos.d/*.repo && \
-    sed -i 's/^#.*baseurl=http/baseurl=http/g' /etc/yum.repos.d/*.repo && \
-    sed -i 's/^mirrorlist=http/#mirrorlist=http/g' /etc/yum.repos.d/*.repo
 
-RUN yum install -y centos-release-scl
+# Install GCC 12+ toolchain (default in Rocky Linux 9) and development tools
+RUN yum install -y gcc gcc-c++ bzip2-devel libffi-devel patch wget zlib-devel make openssl-devel
 
-# installing centos-release-scl adds the Software Collections repo to Yum's configuration,
-# so the following replacement should be used for downloading from Centos vault
-RUN sed -i 's|mirror.centos.org/centos|vault.centos.org/altarch|g' /etc/yum.repos.d/*.repo && \
-    sed -i 's/^#.*baseurl=http/baseurl=http/g' /etc/yum.repos.d/*.repo && \
-    sed -i 's/^mirrorlist=http/#mirrorlist=http/g' /etc/yum.repos.d/*.repo
-
-# use node 10 as it's guaranteed to run on CentOS6
-RUN yum-config-manager --enable rhel-server-rhscl-7-rpms && \
-    yum install -y devtoolset-10 bzip2-devel libffi-devel patch wget zlib-devel && \
-    wget -q https://nodejs.org/dist/v10.23.0/node-v10.23.0-linux-arm64.tar.gz && \
-    gunzip node-v10.23.0-linux-arm64.tar.gz && tar xf node-v10.23.0-linux-arm64.tar && rm node-v10.23.0-linux-arm64.tar && \
+# Install Node.js 10 for bootstrapping
+RUN wget -q https://nodejs.org/dist/v10.23.0/node-v10.23.0-linux-arm64.tar.gz && \
+    tar -xf node-v10.23.0-linux-arm64.tar.gz && \
+    rm node-v10.23.0-linux-arm64.tar.gz && \
     ln -s /node-v10.23.0-linux-arm64/bin/node /bin/node && \ 
     ln -s /node-v10.23.0-linux-arm64/bin/npm /bin/npm
 
-# Build and install Python 3.9 as a prerequisite for building Node.js 24
-RUN PYTHON_VERSION=3.9.22 && \
-    wget https://www.python.org/ftp/python/$PYTHON_VERSION/Python-$PYTHON_VERSION.tgz && \
-    tar -xvf Python-$PYTHON_VERSION.tgz && \
-    cd Python-$PYTHON_VERSION && \
-    ./configure --prefix=/usr/local && \
-    make && \
-    make install && \
-    cd .. && \
-    rm -rf Python-$PYTHON_VERSION.tgz Python-$PYTHON_VERSION && \
-    ln -fs /usr/bin/python3 /usr/bin/python
+# Verify GCC version and install gcc-toolset-12 if available for GCC 12.2+
+RUN yum install -y gcc-toolset-12 gcc-toolset-12-gcc-c++
 
-# to buid using this container you need to enable the right slc toolchain ie
-# scl enable devtoolset-8 '<your-build-command-here>'
+# Build and install Python 3.9 as a prerequisite for building Node.js 24
+# RUN PYTHON_VERSION=3.9.22 && \
+#     wget https://www.python.org/ftp/python/$PYTHON_VERSION/Python-$PYTHON_VERSION.tgz && \
+#     tar -xvf Python-$PYTHON_VERSION.tgz && \
+#     cd Python-$PYTHON_VERSION && \
+#     ./configure --prefix=/usr/local && \
+#     make && \
+#     make install && \
+#     cd .. && \
+#     rm -rf Python-$PYTHON_VERSION.tgz Python-$PYTHON_VERSION && \
+#     ln -fs /usr/local/bin/python3 /usr/bin/python
+
+RUN yum install -y python39 && \
+    ln -fs /usr/bin/python3.9 /usr/bin/python
+
+# To build using this container with GCC 12+:
+# source /opt/rh/gcc-toolset-12/enable (if installed) && <your-build-command-here>

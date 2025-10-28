@@ -1,0 +1,11 @@
+--- a/configure.py
++++ b/configure.py
+@@ -1788,7 +1788,7 @@ def configure_v8(o, configs):
+   # Until we manage to get rid of all those, v8_enable_sandbox cannot be used.
+   # Note that enabling pointer compression without enabling sandbox is unsupported by V8,
+   # so this can be broken at any time.
+-  o['variables']['v8_enable_sandbox'] = 0
++  o['variables']['v8_enable_sandbox'] = 1 if options.enable_pointer_compression else 0
+   o['variables']['v8_enable_pointer_compression_shared_cage'] = 1 if options.enable_pointer_compression else 0
+   o['variables']['v8_enable_external_code_space'] = 1 if options.enable_pointer_compression else 0
+   o['variables']['v8_enable_31bit_smis_on_64bit_arch'] = 1 if options.enable_pointer_compression else 0
