@@ -217,8 +217,8 @@ class NodeJsBuilder {
   }
 
   async patchThirdPartyMain() {
-    await patchFile(this.nodeSrcDir, join(this.patchDir, 'run_third_party_main.js.patch'));
-    await patchFile(this.nodeSrcDir, join(this.patchDir, 'node.cc.patch'));
+    // await patchFile(this.nodeSrcDir, join(this.patchDir, 'run_third_party_main.js.patch'));
+    // await patchFile(this.nodeSrcDir, join(this.patchDir, 'node.cc.patch'));
   }
 
   async patchNodeCompileIssues() {
@@ -240,8 +240,8 @@ class NodeJsBuilder {
   }
 
   async patchNodePerformance() {
-    await patchFile(this.nodeSrcDir, join(this.patchDir, 'json-stringifier.cc.patch'));
-    await patchFile(this.nodeSrcDir, join(this.patchDir, 'end-of-stream.js.patch'));
+    // await patchFile(this.nodeSrcDir, join(this.patchDir, 'json-stringifier.cc.patch'));
+    // await patchFile(this.nodeSrcDir, join(this.patchDir, 'end-of-stream.js.patch'));
   }
 
   async applyPatches() {
