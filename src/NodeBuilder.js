@@ -217,8 +217,8 @@ class NodeJsBuilder {
   }
 
   async patchThirdPartyMain() {
-    await patchFile(this.nodeSrcDir, join(this.patchDir, 'run_third_party_main.js.patch'));
-    await patchFile(this.nodeSrcDir, join(this.patchDir, 'node.cc.patch'));
+    // await patchFile(this.nodeSrcDir, join(this.patchDir, 'run_third_party_main.js.patch'));
+    // await patchFile(this.nodeSrcDir, join(this.patchDir, 'node.cc.patch'));
   }
 
   async patchNodeCompileIssues() {
@@ -229,23 +229,26 @@ class NodeJsBuilder {
       await patchFile(this.nodeSrcDir, join(this.patchDir, 'v8config.patch'));
       // The following patches fix the memory leak when using pointer compression
       // They are fixing both Linux and Windows, however, we only apply them to Windows to keep the blast radius small
-      await patchFile(this.nodeSrcDir, join(this.patchDir, 'configure.py.patch'));
-      await patchFile(this.nodeSrcDir, join(this.patchDir, 'node_buffer.cc.patch'));
-      await patchFile(this.nodeSrcDir, join(this.patchDir, 'v8_backing_store_callers.patch'));
+      // await patchFile(this.nodeSrcDir, join(this.patchDir, 'configure.py.patch'));
+      // await patchFile(this.nodeSrcDir, join(this.patchDir, 'node_buffer.cc.patch'));
+      // await patchFile(this.nodeSrcDir, join(this.patchDir, 'v8_backing_store_callers.patch'));
     }
 
     if (isLinux) {
+      // await patchFile(this.nodeSrcDir, join(this.patchDir, 'configure.py.patch'));
+      // await patchFile(this.nodeSrcDir, join(this.patchDir, 'node_buffer.cc.patch'));
+      // await patchFile(this.nodeSrcDir, join(this.patchDir, 'v8_backing_store_callers.patch'));
       await patchFile(this.nodeSrcDir, join(this.patchDir, 'no_rand_on_glibc.patch'));
     }
   }
 
   async patchNodePerformance() {
-    await patchFile(this.nodeSrcDir, join(this.patchDir, 'json-stringifier.cc.patch'));
-    await patchFile(this.nodeSrcDir, join(this.patchDir, 'end-of-stream.js.patch'));
+    // await patchFile(this.nodeSrcDir, join(this.patchDir, 'json-stringifier.cc.patch'));
+    // await patchFile(this.nodeSrcDir, join(this.patchDir, 'end-of-stream.js.patch'));
   }
 
   async applyPatches() {
-    await this.patchThirdPartyMain();
+    // await this.patchThirdPartyMain();
     await this.patchNodeCompileIssues();
     await this.patchNodePerformance();
   }
@@ -258,29 +261,53 @@ class NodeJsBuilder {
     return runCommand('df', ['-h']);
   }
 
+  buildDockerImage(arch = 'linux/amd64') {
+    const isNonX64 = arch !== 'linux/amd64';
+    const containerTag = `cribl/js2bin-builder:${this.builderImageVersion}${isNonX64 ? '-nonx64' : ''}`;
+    const dockerfile = isNonX64 ? 'Dockerfile.centos7.arm64' : 'Dockerfile.centos7';
+    const dockerfilePath = join(process.cwd(), dockerfile);
+
+    log(`Building Docker image: ${containerTag} from ${dockerfile}...`);
+
+    const buildArgs = [
+      'build',
+      '-f', dockerfilePath,
+      '-t', containerTag,
+      '.'
+    ];
+
+    if (isNonX64) {
+      buildArgs.splice(1, 0, '--platform', arch);
+    }
+
+    return runCommand('docker', buildArgs, process.cwd());
+  }
+
   buildInContainer(ptrCompression) {
     const containerTag = `cribl/js2bin-builder:${this.builderImageVersion}`;
-    return runCommand(
+    return this.buildDockerImage('linux/amd64')
+      .then(() => runCommand(
         'docker', ['run',
           '-v', `${process.cwd()}:/js2bin/`,
           '-t', containerTag,
           '/bin/bash', '-c',
-        `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
+        `source /opt/rh/gcc-toolset-12/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
         ]
-      );
+      ));
   }
 
   buildInContainerNonX64(arch, ptrCompression) {
     const containerTag = `cribl/js2bin-builder:${this.builderImageVersion}-nonx64`;
-    return runCommand(
+    return this.buildDockerImage(arch)
+      .then(() => runCommand(
         'docker', ['run',
           '--platform', arch,
           '-v', `${process.cwd()}:/js2bin/`,
           '-t', containerTag,
           '/bin/bash', '-c',
-          `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
+          `source /opt/rh/gcc-toolset-12/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
         ]
-      );
+      ));
   }
 
   // 1. download node source
@@ -290,6 +317,7 @@ class NodeJsBuilder {
   // 5. kick off ./configure & build
   buildFromSource(uploadBuild, cache, container, arch, ptrCompression) {
     const makeArgs = isWindows ? ['x64', 'no-cctest'] : [`-j${os.cpus().length}`];
+    // const makeArgs = isWindows ? ['x64', 'no-cctest'] : [`-j1`];
     const configArgs = [];
     if(ptrCompression) {
       if(isWindows) makeArgs.push('v8_ptr_compress');
