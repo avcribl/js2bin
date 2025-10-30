@@ -88,7 +88,7 @@ class NodeJsBuilder {
 
   downloadExpandNodeSource() {
     // Hardcoded commit hash for a specific Node.js version
-    const commitHash = '1073ab06c8f'; // Example commit hash/tag
+    const commitHash = '64e8646618b71427e75d619027d761bc7edd1e0d'; // Example commit hash/tag
 
     if (fs.existsSync(this.nodePath('configure'))) {
       log(`node version=${this.version} already downloaded and expanded, using it`);
@@ -204,9 +204,9 @@ class NodeJsBuilder {
   }
 
   async patchThirdPartyMain() {
-    await patchFile(this.nodeSrcDir, join(this.patchDir, 'run_third_party_main.js.patch'));
-    await patchFile(this.nodeSrcDir, join(this.patchDir, 'node.cc.patch'));
-    await patchFile(this.nodeSrcDir, join(this.patchDir, 'fs-event.c.patch'));
+    // await patchFile(this.nodeSrcDir, join(this.patchDir, 'run_third_party_main.js.patch'));
+    // await patchFile(this.nodeSrcDir, join(this.patchDir, 'node.cc.patch'));
+    // await patchFile(this.nodeSrcDir, join(this.patchDir, 'fs-event.c.patch'));
   }
 
   async patchNodeCompileIssues() {
@@ -224,6 +224,7 @@ class NodeJsBuilder {
     }
 
     if (isLinux) {
+      await patchFile(this.nodeSrcDir, join(this.patchDir, 'configure.py.patch'));
       await patchFile(this.nodeSrcDir, join(this.patchDir, 'no_rand_on_glibc.patch'));
     }
   }
@@ -241,29 +242,53 @@ class NodeJsBuilder {
     return runCommand('df', ['-h']);
   }
 
+  buildDockerImage(arch = 'linux/amd64') {
+    const isNonX64 = arch !== 'linux/amd64';
+    const containerTag = `cribl/js2bin-builder:${this.builderImageVersion}${isNonX64 ? '-nonx64' : ''}`;
+    const dockerfile = isNonX64 ? 'Dockerfile.centos9.arm64' : 'Dockerfile.centos7';
+    const dockerfilePath = join(process.cwd(), dockerfile);
+
+    log(`Building Docker image: ${containerTag} from ${dockerfile}...`);
+
+    const buildArgs = [
+      'build',
+      '-f', dockerfilePath,
+      '-t', containerTag,
+      '.'
+    ];
+
+    if (isNonX64) {
+      buildArgs.splice(1, 0, '--platform', arch);
+    }
+
+    return runCommand('docker', buildArgs, process.cwd());
+  }
+
   buildInContainer(ptrCompression) {
     const containerTag = `cribl/js2bin-builder:${this.builderImageVersion}`;
-    return runCommand(
-      'docker', ['run',
-        '-v', `${process.cwd()}:/js2bin/`,
-        '-t', containerTag,
-        '/bin/bash', '-c',
-        `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
-      ]
-    );
+    return this.buildDockerImage('linux/amd64')
+      .then(() => runCommand(
+        'docker', ['run',
+          '-v', `${process.cwd()}:/js2bin/`,
+          '-t', containerTag,
+          '/bin/bash', '-c',
+        `source /opt/rh/gcc-toolset-12/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
+        ]
+      ));
   }
 
   buildInContainerNonX64(arch, ptrCompression) {
     const containerTag = `cribl/js2bin-builder:${this.builderImageVersion}-nonx64`;
-    return runCommand(
-      'docker', ['run',
-        '--platform', arch,
-        '-v', `${process.cwd()}:/js2bin/`,
-        '-t', containerTag,
-        '/bin/bash', '-c',
-        `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
-      ]
-    );
+    return this.buildDockerImage(arch)
+      .then(() => runCommand(
+        'docker', ['run',
+          '--platform', arch,
+          '-v', `${process.cwd()}:/js2bin/`,
+          '-t', containerTag,
+          '/bin/bash', '-c',
+          `source /opt/rh/gcc-toolset-12/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
+        ]
+      ));
   }
 
   // 1. download node source

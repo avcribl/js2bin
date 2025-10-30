@@ -1,0 +1,33 @@
+FROM rockylinux:9
+
+
+# Install GCC 12+ toolchain (default in Rocky Linux 9) and development tools
+RUN yum install -y gcc gcc-c++ bzip2-devel libffi-devel patch wget zlib-devel make openssl-devel
+
+# Install Node.js 10 for bootstrapping
+RUN wget -q https://nodejs.org/dist/v10.23.0/node-v10.23.0-linux-arm64.tar.gz && \
+    tar -xf node-v10.23.0-linux-arm64.tar.gz && \
+    rm node-v10.23.0-linux-arm64.tar.gz && \
+    ln -s /node-v10.23.0-linux-arm64/bin/node /bin/node && \ 
+    ln -s /node-v10.23.0-linux-arm64/bin/npm /bin/npm
+
+# Verify GCC version and install gcc-toolset-12 if available for GCC 12.2+
+RUN yum install -y gcc-toolset-12 gcc-toolset-12-gcc-c++
+
+# Build and install Python 3.9 as a prerequisite for building Node.js 24
+# RUN PYTHON_VERSION=3.9.22 && \
+#     wget https://www.python.org/ftp/python/$PYTHON_VERSION/Python-$PYTHON_VERSION.tgz && \
+#     tar -xvf Python-$PYTHON_VERSION.tgz && \
+#     cd Python-$PYTHON_VERSION && \
+#     ./configure --prefix=/usr/local && \
+#     make && \
+#     make install && \
+#     cd .. && \
+#     rm -rf Python-$PYTHON_VERSION.tgz Python-$PYTHON_VERSION && \
+#     ln -fs /usr/local/bin/python3 /usr/bin/python
+
+RUN yum install -y python39 && \
+    ln -fs /usr/bin/python3.9 /usr/bin/python
+
+# To build using this container with GCC 12+:
+# source /opt/rh/gcc-toolset-12/enable (if installed) && <your-build-command-here>
