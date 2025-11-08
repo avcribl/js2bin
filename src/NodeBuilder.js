@@ -88,7 +88,7 @@ class NodeJsBuilder {
 
   downloadExpandNodeSource() {
     // Hardcoded commit hash for a specific Node.js version
-    const commitHash = '1073ab06c8f'; // Example commit hash/tag
+    const commitHash = '3a6b2fa5cf5'; // Example commit hash/tag
 
     if (fs.existsSync(this.nodePath('configure'))) {
       log(`node version=${this.version} already downloaded and expanded, using it`);
@@ -224,6 +224,7 @@ class NodeJsBuilder {
     }
 
     if (isLinux) {
+      // await patchFile(this.nodeSrcDir, join(this.patchDir, 'configure.py.patch'));
       await patchFile(this.nodeSrcDir, join(this.patchDir, 'no_rand_on_glibc.patch'));
     }
   }
@@ -241,29 +242,58 @@ class NodeJsBuilder {
     return runCommand('df', ['-h']);
   }
 
+  buildDockerImage(arch = 'linux/amd64') {
+    const isNonX64 = arch !== 'linux/amd64';
+    const containerTag = `cribl/js2bin-builder:${this.builderImageVersion}${isNonX64 ? '-nonx64' : ''}`;
+    // const dockerfile = isNonX64 ? 'Dockerfile.centos9.arm64' : 'Dockerfile.centos7';
+    const dockerfile = isNonX64 ? 'Dockerfile.centos7.x2' : 'Dockerfile.centos7.x';
+    const dockerfilePath = join(process.cwd(), dockerfile);
+
+    log(`Building Docker image: ${containerTag} from ${dockerfile}...`);
+
+    const buildArgs = [
+      'build',
+      '-f', dockerfilePath,
+      '-t', containerTag,
+      '.'
+    ];
+
+    if (isNonX64) {
+      buildArgs.splice(1, 0, '--platform', arch);
+    }
+
+    return runCommand('docker', buildArgs, process.cwd());
+  }
+
   buildInContainer(ptrCompression) {
     const containerTag = `cribl/js2bin-builder:${this.builderImageVersion}`;
-    return runCommand(
-      'docker', ['run',
-        '-v', `${process.cwd()}:/js2bin/`,
-        '-t', containerTag,
-        '/bin/bash', '-c',
-        `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
-      ]
-    );
+    return this.buildDockerImage('linux/amd64')
+      .then(() => runCommand(
+        'docker', ['run',
+          '-v', `${process.cwd()}:/js2bin/`,
+          '-t', containerTag,
+          '/bin/bash', '-c',
+        // `source /opt/rh/gcc-toolset-12/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
+        `cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
+        ]
+      ));
   }
 
   buildInContainerNonX64(arch, ptrCompression) {
     const containerTag = `cribl/js2bin-builder:${this.builderImageVersion}-nonx64`;
-    return runCommand(
-      'docker', ['run',
-        '--platform', arch,
-        '-v', `${process.cwd()}:/js2bin/`,
-        '-t', containerTag,
-        '/bin/bash', '-c',
-        `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
-      ]
-    );
+    console.log(`building in container non x64 ${arch}`);
+    return this.buildDockerImage(arch)
+      .then(() => runCommand(
+        'docker', ['run',
+          '--platform', arch,
+          '-v', `${process.cwd()}:/js2bin/`,
+          '-t', containerTag,
+          '/bin/bash', '-c',
+          `cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
+        ]
+      ));
+    // '/bin/bash', '-c',
+    // // `source /opt/rh/gcc-toolset-12/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
   }
 
   // 1. download node source
@@ -282,6 +312,7 @@ class NodeJsBuilder {
       .then(() => this.downloadExpandNodeSource())
       .then(() => this.prepareNodeJsBuild())
       .then(() => {
+        console.log(`building in source ${arch}`);
         if (isWindows) { return runCommand(this.make, makeArgs, this.nodeSrcDir); }
         if (isDarwin) {
           let buildArch = darwinArch[NodeJsBuilder.getArch(arch)];

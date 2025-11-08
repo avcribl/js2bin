@@ -1,0 +1,143 @@
+FROM centos:7
+
+# Increase yum cache space and clean it properly
+RUN yum clean all && rm -rf /var/cache/yum
+
+# Set environment variables
+ENV GCC_VERSION=12.2.0
+ENV BINUTILS_VERSION=2.39
+ENV PREFIX=/usr/local/gcc-${GCC_VERSION}
+ENV PATH=${PREFIX}/bin:$PATH
+ENV LD_LIBRARY_PATH=${PREFIX}/lib64:${PREFIX}/lib:$LD_LIBRARY_PATH
+
+# Use CentOS vault for downloading (CentOS 7 is EOL)
+RUN sed -i 's/mirror.centos.org/vault.centos.org/g' /etc/yum.repos.d/*.repo && \
+    sed -i 's/^#.*baseurl=http/baseurl=http/g' /etc/yum.repos.d/*.repo && \
+    sed -i 's/^mirrorlist=http/#mirrorlist=http/g' /etc/yum.repos.d/*.repo
+
+RUN yum install -y centos-release-scl
+
+# installing centos-release-scl adds the Software Collections repo to Yum's configuration,
+# so the following replacement should be used for downloading from Centos vault
+RUN sed -i 's|mirror.centos.org/centos|vault.centos.org/altarch|g' /etc/yum.repos.d/*.repo && \
+    sed -i 's/^#.*baseurl=http/baseurl=http/g' /etc/yum.repos.d/*.repo && \
+    sed -i 's/^mirrorlist=http/#mirrorlist=http/g' /etc/yum.repos.d/*.repo
+
+# use node 10 as it's guaranteed to run on CentOS6
+RUN yum-config-manager --enable rhel-server-rhscl-7-rpms && \
+    yum install -y devtoolset-10 bzip2-devel libffi-devel patch wget zlib-devel && \
+    wget -q https://nodejs.org/dist/v10.23.0/node-v10.23.0-linux-x64.tar.gz && \
+    tar -xf node-v10.23.0-linux-x64.tar.gz && \ 
+    rm node-v10.23.0-linux-x64.tar.gz && \
+    ln -s /node-v10.23.0-linux-x64/bin/node /bin/node && \ 
+    ln -s /node-v10.23.0-linux-x64/bin/npm /bin/npm 
+
+# Install required dependencies
+RUN yum install -y \
+    wget \
+    bzip2 \
+    gcc \
+    gcc-c++ \
+    make \
+    gmp-devel \
+    mpfr-devel \
+    libmpc-devel \
+    zlib-devel \
+    file \
+    diffutils \
+    openssl-devel \
+    bzip2-devel \
+    libffi-devel \
+    sqlite-devel \
+    readline-devel \
+    xz-devel \
+    texinfo \
+    && yum clean all
+
+# Build and install Python 3.9 from source
+RUN PYTHON_VERSION=3.9.22 && \
+    wget https://www.python.org/ftp/python/$PYTHON_VERSION/Python-$PYTHON_VERSION.tgz && \
+    tar -xzf Python-$PYTHON_VERSION.tgz && \
+    cd Python-$PYTHON_VERSION && \
+    ./configure --prefix=/usr/local --enable-optimizations && \
+    make -j$(nproc) && \
+    make install && \
+    cd .. && \
+    rm -rf Python-$PYTHON_VERSION.tgz Python-$PYTHON_VERSION && \
+    ln -sf /usr/local/bin/python3.9 /usr/bin/python3 && \
+    ln -sf /usr/local/bin/pip3.9 /usr/bin/pip3
+
+# Create build directory
+WORKDIR /tmp/gcc-build
+
+# Build and install binutils first (needed for newer ARM instruction support)
+RUN wget https://ftp.gnu.org/gnu/binutils/binutils-${BINUTILS_VERSION}.tar.gz && \
+    tar -xzf binutils-${BINUTILS_VERSION}.tar.gz && \
+    rm binutils-${BINUTILS_VERSION}.tar.gz && \
+    mkdir binutils-build && \
+    cd binutils-build && \
+    ../binutils-${BINUTILS_VERSION}/configure \
+        --prefix=${PREFIX} \
+        --enable-gold \
+        --enable-ld=default \
+        --enable-plugins \
+        --enable-shared \
+        --disable-werror \
+        --disable-gprofng \
+        --with-system-zlib && \
+    make -j$(nproc) && \
+    make install && \
+    cd .. && \
+    rm -rf binutils-${BINUTILS_VERSION} binutils-build
+
+# Download GCC source
+RUN wget https://ftp.gnu.org/gnu/gcc/gcc-${GCC_VERSION}/gcc-${GCC_VERSION}.tar.gz \
+    && tar -xzf gcc-${GCC_VERSION}.tar.gz \
+    && rm gcc-${GCC_VERSION}.tar.gz
+
+# Download prerequisites
+WORKDIR /tmp/gcc-build/gcc-${GCC_VERSION}
+RUN ./contrib/download_prerequisites
+
+# Create build directory (out-of-tree build recommended)
+RUN mkdir /tmp/gcc-build/build
+WORKDIR /tmp/gcc-build/build
+
+# Configure GCC
+RUN ../gcc-${GCC_VERSION}/configure \
+    --prefix=${PREFIX} \
+    --enable-languages=c,c++ \
+    --disable-multilib \
+    --disable-bootstrap \
+    --enable-shared \
+    --enable-threads=posix \
+    --enable-checking=release \
+    --with-system-zlib
+
+# Build GCC (this will take a long time)
+# Use all available cores for compilation
+RUN make -j$(nproc)
+
+# Install GCC
+RUN make install
+
+# Make GCC 12.2 the default compiler
+RUN update-alternatives --install /usr/bin/gcc gcc ${PREFIX}/bin/gcc 100 \
+    --slave /usr/bin/g++ g++ ${PREFIX}/bin/g++ \
+    --slave /usr/bin/gcov gcov ${PREFIX}/bin/gcov
+
+# Set compiler environment variables for compatibility
+ENV CC=${PREFIX}/bin/gcc
+ENV CXX=${PREFIX}/bin/g++
+
+# Clean up build files to reduce image size
+WORKDIR /
+RUN rm -rf /tmp/gcc-build
+
+# Verify installation
+RUN gcc --version && g++ --version && python3 --version
+
+# Set working directory
+WORKDIR /workspace
+
+CMD ["/bin/bash"]

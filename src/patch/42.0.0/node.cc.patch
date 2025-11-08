@@ -1,0 +1,50 @@
+--- a/src/node.cc
++++ b/src/node.cc
+@@ -404,6 +404,14 @@ MaybeLocal<Value> StartExecution(Environment* env, StartExecutionCallback cb) {
+     return env->RunSnapshotDeserializeMain();
+   }
+ 
++  // To allow people to extend Node in different ways, this hook allows
++  // one to drop a file lib/_third_party_main.js into the build
++  // directory which will be executed instead of Node's normal loading.
++  if (env->builtin_loader()->Exists("_third_party_main")) {
++    return StartExecution(env, "internal/main/run_third_party_main");
++  }
++
++
+   if (env->worker_context() != nullptr) {
+     return StartExecution(env, "internal/main/worker_thread");
+   }
+
+--- a/lib/internal/streams/end-of-stream.js
++++ b/lib/internal/streams/end-of-stream.js
+@@ -44,6 +44,9 @@ const {
+   kIsClosedPromise,
+ } = require('internal/streams/utils');
+ 
++const { getHookArrays } = require('internal/async_hooks');
++const AsyncContextFrame = require('internal/async_context_frame');
++
+ // Lazy load
+ let AsyncResource;
+ let addAbortListener;
+@@ -74,10 +77,15 @@ function eos(stream, options, callback) {
+   validateFunction(callback, 'callback');
+   validateAbortSignal(options.signal, 'options.signal');
+ 
+-  // Avoid AsyncResource.bind() because it calls ObjectDefineProperties which
+-  // is a bottleneck here.
+-  callback = once(bindAsyncResource(callback, 'STREAM_END_OF_STREAM'));
+-
++  if (AsyncContextFrame.current() ||
++      getHookArrays()[0].length > 0) {
++    // Avoid AsyncResource.bind() because it calls ObjectDefineProperties which
++    // is a bottleneck here.
++    callback = once(bindAsyncResource(callback, 'STREAM_END_OF_STREAM'));
++  } else {
++    callback = once(callback);
++  }
++  
+   if (isReadableStream(stream) || isWritableStream(stream)) {
+     return eosWeb(stream, options, callback);
+   }     
