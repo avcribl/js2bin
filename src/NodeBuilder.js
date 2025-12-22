@@ -1,6 +1,7 @@
 
 const { log, download, upload, deleteArtifact, getAssetIdByName, fetch, mkdirp, rmrf, copyFileAsync, runCommand, renameAsync, patchFile } = require('./util');
-const { gzipSync, createGunzip } = require('zlib');
+const { brotliCompressSync, createGunzip } = require('zlib');
+const zlib = require('zlib');
 const { join, dirname, basename, parse, resolve } = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -43,15 +44,16 @@ const darwinArch = {
   x64: 'x86_64',
 };
 
-function buildName(platform, arch, placeHolderSizeMB, version) {
-  return `${platform}-${arch}-${version}-v1-${placeHolderSizeMB}MB`;
+function buildName(platform, arch, placeHolderSizeMB, version, buildVersion) {
+  return `${platform}-${arch}-${version}-${buildVersion}-${placeHolderSizeMB}MB`;
 }
 
 class NodeJsBuilder {
-  constructor(cwd, version, mainAppFile, appName, patchDir) {
+  constructor(cwd, version, mainAppFile, appName, patchDir, buildVersion) {
     this.version = version;
     this.appFile = resolve(mainAppFile);
     this.appName = appName;
+    this.buildVersion = buildVersion || 'v1';
     if (!this.appName) {
       if (basename(this.appFile) !== 'index.js') { // use filename if ! index.js
         this.appName = basename(this.appFile).split('.')[0];
@@ -107,7 +109,7 @@ class NodeJsBuilder {
 
   downloadCachedBuild(platform, arch, placeHolderSizeMB) {
     placeHolderSizeMB = placeHolderSizeMB || this.placeHolderSizeMB;
-    const name = buildName(platform, arch, placeHolderSizeMB, this.version);
+    const name = buildName(platform, arch, placeHolderSizeMB, this.version, this.buildVersion);
     const filename = join(this.cacheDir, name);
     if (fs.existsSync(filename)) {
       log(`build name=${name} already downloaded, using it`);
@@ -123,7 +125,7 @@ class NodeJsBuilder {
     if (!name) {
       arch = NodeJsBuilder.getArch(arch);
       const platform = prettyPlatform[process.platform] + (ptrCompression ? '-ptrc' : '');
-      name = buildName(platform, arch, this.placeHolderSizeMB, this.version);
+      name = buildName(platform, arch, this.placeHolderSizeMB, this.version, this.buildVersion);
     }
 
     let p = Promise.resolve();
@@ -192,7 +194,15 @@ class NodeJsBuilder {
   }
 
   getAppContentToBundle() {
-    const mainAppFileCont = gzipSync(fs.readFileSync(this.appFile), {level: 9}).toString('base64');
+    const mainAppFileCont = brotliCompressSync(
+      fs.readFileSync(this.appFile),
+      {
+        params: {
+          [zlib.constants.BROTLI_PARAM_QUALITY]: zlib.constants.BROTLI_MAX_QUALITY, // 11 (max)
+          [zlib.constants.BROTLI_PARAM_SIZE_HINT]: fs.statSync(this.appFile).size
+        }
+      }
+    ).toString('base64');
     return Buffer.from(this.appName).toString('base64') + '\n' + mainAppFileCont;
   }
 
@@ -338,6 +348,7 @@ class NodeJsBuilder {
   buildFromCached(platform = 'linux', arch = 'x64', outFile = undefined, cache = false, size) {
     const mainAppFileCont = this.getAppContentToBundle();
     this.placeHolderSizeMB = Math.ceil(mainAppFileCont.length / 1024 / 1024); // 2, 4, 6, 8...
+    log(`main app file content size=${mainAppFileCont.length}, place holder size MB=${this.placeHolderSizeMB}`);
     if (this.placeHolderSizeMB % 2 !== 0) {
       this.placeHolderSizeMB += 1;
     }
