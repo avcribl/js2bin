@@ -270,18 +270,22 @@ class NodeJsBuilder {
 
   buildInContainer(ptrCompression) {
     const containerTag = `cribl/js2bin-builder:${this.builderImageVersion}`;
+    const dockerEnv = { ...process.env, DOCKER_API_VERSION: '1.42' };
     return runCommand(
         'docker', ['run',
           '-v', `${process.cwd()}:/js2bin/`,
           '-t', containerTag,
           '/bin/bash', '-c',
         `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
-        ]
+        ],
+        undefined,
+        dockerEnv
       );
   }
 
   buildInContainerNonX64(arch, ptrCompression) {
     const containerTag = `cribl/js2bin-builder:${this.builderImageVersion}-nonx64`;
+    const dockerEnv = { ...process.env, DOCKER_API_VERSION: '1.42' };
     return runCommand(
         'docker', ['run',
           '--platform', arch,
@@ -289,7 +293,9 @@ class NodeJsBuilder {
           '-t', containerTag,
           '/bin/bash', '-c',
           `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
-        ]
+        ],
+        undefined,
+        dockerEnv
       );
   }
 
