@@ -45,11 +45,12 @@ const darwinArch = {
 };
 
 function buildName(platform, arch, placeHolderSizeMB, version, buildVersion) {
+  version = '22.21.0';
   return `${platform}-${arch}-${version}-${buildVersion}-${placeHolderSizeMB}MB`;
 }
 
 class NodeJsBuilder {
-  constructor(cwd, version, mainAppFile, appName, patchDir, buildVersion) {
+  constructor(cwd, version, mainAppFile, appName, patchDir, buildVersion, commitHash) {
     this.version = version;
     this.appFile = resolve(mainAppFile);
     this.appName = appName;
@@ -75,6 +76,7 @@ class NodeJsBuilder {
     this.resultFile = isWindows ? join(this.nodeSrcDir, 'Release', 'node.exe') : join(this.nodeSrcDir, 'out', 'Release', 'node');
     this.placeHolderSizeMB = -1;
     this.builderImageVersion = 3;
+    this.commitHash = commitHash;
   }
 
   static platform() {
@@ -86,6 +88,28 @@ class NodeJsBuilder {
       arch = arch.split('/')[1];
     }
     return arch in prettyArch ? prettyArch[arch] : arch;
+  }
+
+  downloadExpandNodeSourceWithCommit() {
+    if (fs.existsSync(this.nodePath('configure'))) {
+      log(`node version=${this.version} already downloaded and expanded, using it`);
+      return Promise.resolve();
+    }
+
+    log(`cloning node source for commit=${this.commitHash} ...`);
+
+    // Create build directory if it doesn't exist
+    return mkdirp(this.buildDir)
+      .then(() => {
+        // Clone the Node.js repository
+        return runCommand('git', ['clone', 'https://github.com/nodejs/node.git', this.nodeSrcDir], this.buildDir);
+      })
+      .then(() => {
+        // Checkout the specific commit hash
+        log(`checking out commit hash: ${this.commitHash}`);
+        return runCommand('git', ['checkout', this.commitHash], this.nodeSrcDir);
+      })
+      .then(() => this.version.split('.')[0] >= 15 ? this.applyPatches() : Promise.resolve());
   }
 
   downloadExpandNodeSource() {
@@ -229,6 +253,8 @@ class NodeJsBuilder {
   async patchThirdPartyMain() {
     await patchFile(this.nodeSrcDir, join(this.patchDir, 'run_third_party_main.js.patch'));
     await patchFile(this.nodeSrcDir, join(this.patchDir, 'node.cc.patch'));
+    // await patchFile(this.nodeSrcDir, join(this.patchDir, 'crypto_context.cc.patch'));
+    await patchFile(this.nodeSrcDir, join(this.patchDir, 't1_lib.c.patch'));
   }
 
   async patchNodeCompileIssues() {
@@ -275,7 +301,7 @@ class NodeJsBuilder {
           '-v', `${process.cwd()}:/js2bin/`,
           '-t', containerTag,
           '/bin/bash', '-c',
-        `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
+        `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${this.commitHash ? `--commitHash=${this.commitHash}` : ''} ${ptrCompression ? '--pointer-compress=true' : ''}`
         ]
       );
   }
@@ -288,7 +314,7 @@ class NodeJsBuilder {
           '-v', `${process.cwd()}:/js2bin/`,
           '-t', containerTag,
           '/bin/bash', '-c',
-          `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
+          `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${this.commitHash ? `--commitHash=${this.commitHash}` : ''} ${ptrCompression ? '--pointer-compress=true' : ''}`
         ]
       );
   }
@@ -306,7 +332,7 @@ class NodeJsBuilder {
       else          configArgs.push('--experimental-enable-pointer-compression');
     }
     return this.printDiskUsage()
-      .then(() => this.downloadExpandNodeSource())
+      .then(() => this.commitHash ? this.downloadExpandNodeSourceWithCommit() : this.downloadExpandNodeSource())
       .then(() => this.prepareNodeJsBuild())
       .then(() => {
         if (isWindows) { return runCommand(this.make, makeArgs, this.nodeSrcDir); }

@@ -1,0 +1,21 @@
+--- a/src/crypto/crypto_context.cc
++++ b/src/crypto/crypto_context.cc
+@@ -1815,7 +1815,17 @@ void SecureContext::SetECDHCurve(const FunctionCallbackInfo<Value>& args) {
+ 
+   Utf8Value curve(env->isolate(), args[0]);
+ 
+-  if (curve != "auto" && !SSL_CTX_set1_curves_list(sc->ctx_.get(), *curve)) {
++  if (curve == "auto") {
++    // Keep OpenSSL defaults, but explicitly drop hybrid X25519MLKEM768.
++    static constexpr char kAutoGroups[] = "DEFAULT:-X25519MLKEM768";
++    if (!SSL_CTX_set1_groups_list(sc->ctx_.get(), kAutoGroups)) {
++      return THROW_ERR_CRYPTO_OPERATION_FAILED(
++          env, "Failed to set automatic ECDH groups");
++    }
++    return;
++  }
++
++  if (!SSL_CTX_set1_curves_list(sc->ctx_.get(), *curve)) {
+     return THROW_ERR_CRYPTO_OPERATION_FAILED(env, "Failed to set ECDH curve");
+   }
+ }
