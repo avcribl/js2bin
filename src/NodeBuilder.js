@@ -49,7 +49,7 @@ function buildName(platform, arch, placeHolderSizeMB, version, buildVersion) {
 }
 
 class NodeJsBuilder {
-  constructor(cwd, version, mainAppFile, appName, patchDir, buildVersion) {
+  constructor(cwd, version, mainAppFile, appName, patchDir, buildVersion, commitHash) {
     this.version = version;
     this.appFile = resolve(mainAppFile);
     this.appName = appName;
@@ -75,6 +75,7 @@ class NodeJsBuilder {
     this.resultFile = isWindows ? join(this.nodeSrcDir, 'Release', 'node.exe') : join(this.nodeSrcDir, 'out', 'Release', 'node');
     this.placeHolderSizeMB = -1;
     this.builderImageVersion = 3;
+    this.commitHash = commitHash;
   }
 
   static platform() {
@@ -86,6 +87,24 @@ class NodeJsBuilder {
       arch = arch.split('/')[1];
     }
     return arch in prettyArch ? prettyArch[arch] : arch;
+  }
+
+  downloadExpandNodeSourceWithCommit() {
+    if (fs.existsSync(this.nodePath('configure'))) {
+      log(`node version=${this.version} already downloaded and expanded, using it`);
+      return Promise.resolve();
+    }
+    log(`cloning node source for commit=${this.commitHash} ...`);
+
+    return mkdirp(this.buildDir)
+      .then(() => {
+        return runCommand('git', ['clone', 'https://github.com/nodejs/node.git', this.nodeSrcDir], this.buildDir);
+      })
+      .then(() => {
+        log(`checking out commit hash: ${this.commitHash}`);
+        return runCommand('git', ['checkout', this.commitHash], this.nodeSrcDir);
+      })
+      .then(() => this.version.split('.')[0] >= 15 ? this.applyPatches() : Promise.resolve());
   }
 
   downloadExpandNodeSource() {
@@ -252,6 +271,7 @@ class NodeJsBuilder {
   async patchNodePerformance() {
     await patchFile(this.nodeSrcDir, join(this.patchDir, 'json-stringifier.cc.patch'));
     await patchFile(this.nodeSrcDir, join(this.patchDir, 'end-of-stream.js.patch'));
+    await patchFile(this.nodeSrcDir, join(this.patchDir, 't1_lib.c.patch'));
   }
 
   async applyPatches() {
@@ -271,26 +291,26 @@ class NodeJsBuilder {
   buildInContainer(ptrCompression) {
     const containerTag = `cribl/js2bin-builder:${this.builderImageVersion}`;
     return runCommand(
-        'docker', ['run',
-          '-v', `${process.cwd()}:/js2bin/`,
-          '-t', containerTag,
-          '/bin/bash', '-c',
-        `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
-        ]
-      );
+      'docker', ['run',
+        '-v', `${process.cwd()}:/js2bin/`,
+        '-t', containerTag,
+        '/bin/bash', '-c',
+        `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${this.commitHash ? `--commitHash=${this.commitHash}` : ''} ${ptrCompression ? '--pointer-compress=true' : ''}`
+      ]
+    );
   }
 
   buildInContainerNonX64(arch, ptrCompression) {
     const containerTag = `cribl/js2bin-builder:${this.builderImageVersion}-nonx64`;
     return runCommand(
-        'docker', ['run',
-          '--platform', arch,
-          '-v', `${process.cwd()}:/js2bin/`,
-          '-t', containerTag,
-          '/bin/bash', '-c',
-          `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
-        ]
-      );
+      'docker', ['run',
+        '--platform', arch,
+        '-v', `${process.cwd()}:/js2bin/`,
+        '-t', containerTag,
+        '/bin/bash', '-c',
+          `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${this.commitHash ? `--commitHash=${this.commitHash}` : ''} ${ptrCompression ? '--pointer-compress=true' : ''}`
+      ]
+    );
   }
 
   // 1. download node source
@@ -306,7 +326,7 @@ class NodeJsBuilder {
       else          configArgs.push('--experimental-enable-pointer-compression');
     }
     return this.printDiskUsage()
-      .then(() => this.downloadExpandNodeSource())
+      .then(() => this.commitHash ? this.downloadExpandNodeSourceWithCommit() : this.downloadExpandNodeSource())
       .then(() => this.prepareNodeJsBuild())
       .then(() => {
         if (isWindows) { return runCommand(this.make, makeArgs, this.nodeSrcDir); }
