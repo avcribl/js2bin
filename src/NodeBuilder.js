@@ -3,9 +3,12 @@ const { log, download, upload, deleteArtifact, getAssetIdByName, fetch, mkdirp, 
 const { brotliCompressSync, createGunzip } = require('zlib');
 const zlib = require('zlib');
 const { join, dirname, basename, parse, resolve } = require('path');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
 const fs = require('fs');
 const os = require('os');
 const tar = require('tar-fs');
+const execFileAsync = promisify(execFile);
 const pkg = require('../package.json');
 
 const isWindows = process.platform === 'win32';
@@ -48,6 +51,20 @@ function buildName(platform, arch, placeHolderSizeMB, version, buildVersion) {
   return `${platform}-${arch}-${version}-${buildVersion}-${placeHolderSizeMB}MB`;
 }
 
+function commitDirSuffix(commitHash) {
+  const s = String(commitHash).trim().replace(/^[\^#]+/, '');
+  const lower = s.toLowerCase();
+  if (/^[0-9a-f]+$/.test(lower)) {
+    return lower;
+  }
+  return lower.replace(/[^a-z0-9-]/g, '_').slice(0, 64) || 'unknown';
+}
+
+function parseSemverFromDescribe(desc) {
+  const m = String(desc).match(/v?(\d+\.\d+\.\d+)/);
+  return m ? m[1] : null;
+}
+
 class NodeJsBuilder {
   constructor(cwd, version, mainAppFile, appName, patchDir, buildVersion, commitHash) {
     this.version = version;
@@ -70,7 +87,9 @@ class NodeJsBuilder {
     this.patchDir = patchDir || join(this.srcDir, 'patch', version);
     this.buildDir = join(cwd || process.cwd(), 'build');
     this.nodeSrcFile = join(this.buildDir, `node-v${version}.tar.gz`);
-    this.nodeSrcDir = join(this.buildDir, `node-v${version}`);
+    this.nodeSrcDir = commitHash
+      ? join(this.buildDir, `node-git-${commitDirSuffix(commitHash)}`)
+      : join(this.buildDir, `node-v${version}`);
     this.cacheDir = join(cwd || process.cwd(), 'cache');
     this.resultFile = isWindows ? join(this.nodeSrcDir, 'Release', 'node.exe') : join(this.nodeSrcDir, 'out', 'Release', 'node');
     this.placeHolderSizeMB = -1;
@@ -89,10 +108,29 @@ class NodeJsBuilder {
     return arch in prettyArch ? prettyArch[arch] : arch;
   }
 
+  inferVersionAndPatchDirFromGit() {
+    return execFileAsync('git', ['describe', '--tags', '--always'], { cwd: this.nodeSrcDir })
+      .then(({ stdout }) => {
+        const describe = stdout.trim();
+        const semver = parseSemverFromDescribe(describe);
+        if (!semver) {
+          throw new Error(`Could not parse semver from git describe output: ${describe}`);
+        }
+        this.version = semver;
+        this.patchDir = join(this.srcDir, 'patch', this.version);
+        log(`inferred version=${this.version} from git describe (${describe})`);
+      });
+  }
+
   downloadExpandNodeSourceWithCommit() {
+    const afterSourceReady = () =>
+      this.inferVersionAndPatchDirFromGit().then(() =>
+        this.version.split('.')[0] >= 15 ? this.applyPatches() : Promise.resolve()
+      );
+
     if (fs.existsSync(this.nodePath('configure'))) {
-      log(`node version=${this.version} already downloaded and expanded, using it`);
-      return Promise.resolve();
+      log(`node commit=${this.commitHash} already downloaded and expanded, using it`);
+      return afterSourceReady();
     }
     log(`cloning node source for commit=${this.commitHash} ...`);
 
@@ -104,7 +142,7 @@ class NodeJsBuilder {
         log(`checking out commit hash: ${this.commitHash}`);
         return runCommand('git', ['checkout', this.commitHash], this.nodeSrcDir);
       })
-      .then(() => this.version.split('.')[0] >= 15 ? this.applyPatches() : Promise.resolve());
+      .then(() => afterSourceReady());
   }
 
   downloadExpandNodeSource() {
