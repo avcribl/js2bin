@@ -3,9 +3,12 @@ const { log, download, upload, deleteArtifact, getAssetIdByName, fetch, mkdirp, 
 const { brotliCompressSync, createGunzip } = require('zlib');
 const zlib = require('zlib');
 const { join, dirname, basename, parse, resolve } = require('path');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
 const fs = require('fs');
 const os = require('os');
 const tar = require('tar-fs');
+const execFileAsync = promisify(execFile);
 const pkg = require('../package.json');
 
 const isWindows = process.platform === 'win32';
@@ -48,8 +51,22 @@ function buildName(platform, arch, placeHolderSizeMB, version, buildVersion) {
   return `${platform}-${arch}-${version}-${buildVersion}-${placeHolderSizeMB}MB`;
 }
 
+function commitDirSuffix(commitHash) {
+  const s = String(commitHash).trim().replace(/^[\^#]+/, '');
+  const lower = s.toLowerCase();
+  if (/^[0-9a-f]+$/.test(lower)) {
+    return lower;
+  }
+  return lower.replace(/[^a-z0-9-]/g, '_').slice(0, 64) || 'unknown';
+}
+
+function parseSemverFromDescribe(desc) {
+  const m = String(desc).match(/v?(\d+\.\d+\.\d+)/);
+  return m ? m[1] : null;
+}
+
 class NodeJsBuilder {
-  constructor(cwd, version, mainAppFile, appName, patchDir, buildVersion) {
+  constructor(cwd, version, mainAppFile, appName, patchDir, buildVersion, commitHash) {
     this.version = version;
     this.appFile = resolve(mainAppFile);
     this.appName = appName;
@@ -70,11 +87,14 @@ class NodeJsBuilder {
     this.patchDir = patchDir || join(this.srcDir, 'patch', version);
     this.buildDir = join(cwd || process.cwd(), 'build');
     this.nodeSrcFile = join(this.buildDir, `node-v${version}.tar.gz`);
-    this.nodeSrcDir = join(this.buildDir, `node-v${version}`);
+    this.nodeSrcDir = commitHash
+      ? join(this.buildDir, `node-git-${commitDirSuffix(commitHash)}`)
+      : join(this.buildDir, `node-v${version}`);
     this.cacheDir = join(cwd || process.cwd(), 'cache');
     this.resultFile = isWindows ? join(this.nodeSrcDir, 'Release', 'node.exe') : join(this.nodeSrcDir, 'out', 'Release', 'node');
     this.placeHolderSizeMB = -1;
     this.builderImageVersion = 3;
+    this.commitHash = commitHash;
   }
 
   static platform() {
@@ -86,6 +106,43 @@ class NodeJsBuilder {
       arch = arch.split('/')[1];
     }
     return arch in prettyArch ? prettyArch[arch] : arch;
+  }
+
+  inferVersionAndPatchDirFromGit() {
+    return execFileAsync('git', ['describe', '--tags', '--always'], { cwd: this.nodeSrcDir })
+      .then(({ stdout }) => {
+        const describe = stdout.trim();
+        const semver = parseSemverFromDescribe(describe);
+        if (!semver) {
+          throw new Error(`Could not parse semver from git describe output: ${describe}`);
+        }
+        this.version = semver;
+        this.patchDir = join(this.srcDir, 'patch', this.version);
+        log(`inferred version=${this.version} from git describe (${describe})`);
+      });
+  }
+
+  downloadExpandNodeSourceWithCommit() {
+    const afterSourceReady = () =>
+      this.inferVersionAndPatchDirFromGit().then(() =>
+        this.version.split('.')[0] >= 15 ? this.applyPatches() : Promise.resolve()
+      );
+
+    if (fs.existsSync(this.nodePath('configure'))) {
+      log(`node commit=${this.commitHash} already downloaded and expanded, using it`);
+      return afterSourceReady();
+    }
+    log(`cloning node source for commit=${this.commitHash} ...`);
+
+    return mkdirp(this.buildDir)
+      .then(() => {
+        return runCommand('git', ['clone', 'https://github.com/nodejs/node.git', this.nodeSrcDir], this.buildDir);
+      })
+      .then(() => {
+        log(`checking out commit hash: ${this.commitHash}`);
+        return runCommand('git', ['checkout', this.commitHash], this.nodeSrcDir);
+      })
+      .then(() => afterSourceReady());
   }
 
   downloadExpandNodeSource() {
@@ -252,6 +309,7 @@ class NodeJsBuilder {
   async patchNodePerformance() {
     await patchFile(this.nodeSrcDir, join(this.patchDir, 'json-stringifier.cc.patch'));
     await patchFile(this.nodeSrcDir, join(this.patchDir, 'end-of-stream.js.patch'));
+    await patchFile(this.nodeSrcDir, join(this.patchDir, 't1_lib.c.patch'));
   }
 
   async applyPatches() {
@@ -271,26 +329,26 @@ class NodeJsBuilder {
   buildInContainer(ptrCompression) {
     const containerTag = `cribl/js2bin-builder:${this.builderImageVersion}`;
     return runCommand(
-        'docker', ['run',
-          '-v', `${process.cwd()}:/js2bin/`,
-          '-t', containerTag,
-          '/bin/bash', '-c',
-        `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
-        ]
-      );
+      'docker', ['run',
+        '-v', `${process.cwd()}:/js2bin/`,
+        '-t', containerTag,
+        '/bin/bash', '-c',
+        `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${this.commitHash ? `--commitHash=${this.commitHash}` : ''} ${ptrCompression ? '--pointer-compress=true' : ''}`
+      ]
+    );
   }
 
   buildInContainerNonX64(arch, ptrCompression) {
     const containerTag = `cribl/js2bin-builder:${this.builderImageVersion}-nonx64`;
     return runCommand(
-        'docker', ['run',
-          '--platform', arch,
-          '-v', `${process.cwd()}:/js2bin/`,
-          '-t', containerTag,
-          '/bin/bash', '-c',
-          `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${ptrCompression ? '--pointer-compress=true' : ''}`
-        ]
-      );
+      'docker', ['run',
+        '--platform', arch,
+        '-v', `${process.cwd()}:/js2bin/`,
+        '-t', containerTag,
+        '/bin/bash', '-c',
+          `source /opt/rh/devtoolset-10/enable && cd /js2bin && npm install && ./js2bin.js --ci --node=${this.version} --size=${this.placeHolderSizeMB}MB ${this.commitHash ? `--commitHash=${this.commitHash}` : ''} ${ptrCompression ? '--pointer-compress=true' : ''}`
+      ]
+    );
   }
 
   // 1. download node source
@@ -306,7 +364,7 @@ class NodeJsBuilder {
       else          configArgs.push('--experimental-enable-pointer-compression');
     }
     return this.printDiskUsage()
-      .then(() => this.downloadExpandNodeSource())
+      .then(() => this.commitHash ? this.downloadExpandNodeSourceWithCommit() : this.downloadExpandNodeSource())
       .then(() => this.prepareNodeJsBuild())
       .then(() => {
         if (isWindows) { return runCommand(this.make, makeArgs, this.nodeSrcDir); }

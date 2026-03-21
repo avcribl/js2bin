@@ -33,6 +33,7 @@ command-args: take the form of --name=value
           e.g. --node=10.16.0
   --size: Amount of preallocated space, can specify more than one. 
           e.g. --size=2MB --size=4MB
+  --commitHash: (opt) Git commit hash to build from. It's useful for building NodeJS from a specific commit hash instead of a versioned release.
   --dir:       (opt) Working directory, if not specified use cwd
   --cache:     (opt) whether to keep build in the cache (to be reused by --build)
   --upload:    (opt) whether to upload node build to github releases
@@ -118,7 +119,7 @@ if (args.build) {
     let lastBuilder;
     sizes.forEach(size => {
       archs.forEach(arch => {
-        const builder = new NodeJsBuilder(args.dir, version, size, undefined, undefined, args.buildVersion);
+        const builder = new NodeJsBuilder(args.dir, version, size, undefined, undefined, args.buildVersion, args.commitHash);
         lastBuilder = builder;
         p = p.then(() => {
           log(`building for version=${version}, size=${size} arch=${arch}`);
