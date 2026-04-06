@@ -68,6 +68,13 @@ js2bin --build --cache --node=10.13.0 --app=/path/to/my/app.js --name=CoolAppNam
   --dir:      (opt) Working directory, if not specified use cwd
               e.g. --dir=/tmp/js2bin
   --cache     (opt) Cache any pre-built binaries used, to avoid redownload
+  --enable-ota: (opt) Use an OTA-enabled cached binary. Requires a cached
+                binary built with --enable-ota via --ci.
+
+--ota: build a signed OTA bundle from a JS application
+  --app:         Path to your (bundled) application
+  --signing-key: Path to ECDSA P-256 private key PEM file for signing
+  --output:      (opt) Output directory (default: ./ota-bundle/)
 
 --ci: build NodeJS with preallocated space for embedding applications
   --node: NodeJS version to build from source, can specify more than one. 
@@ -78,8 +85,87 @@ js2bin --build --cache --node=10.13.0 --app=/path/to/my/app.js --name=CoolAppNam
   --cache:  (opt) whether to keep build in the cache (to be reused by --build)
   --upload: (opt) whether to upload node build to github releases
   --clean:  (opt) whether to clean up after the build
+  --enable-ota: (opt) Compile the OTA runtime into the binary. Without this,
+                no OTA code exists in the binary.
+  --signing-public-key: (opt) Embed an ECDSA P-256 public key into the binary.
+                Requires --enable-ota.
 
 
+```
+
+# OTA (Over-the-Air) Updates
+
+js2bin supports OTA updates, allowing you to ship updated JavaScript to existing binaries without rebuilding them. **OTA support is completely opt-in** — by default, no OTA code exists in the binary. You must explicitly enable it at build time.
+
+## How it works
+
+When a binary is built with `--enable-ota`, it checks for a signed OTA bundle at startup. If a valid bundle is found, it runs that instead of the embedded app. If no bundle is found (or the signature is invalid), it falls back to the embedded app. The binary will never run unsigned or tampered code.
+
+## Building an OTA-enabled binary
+
+OTA-enabled binaries must be built from source because the OTA runtime needs to be compiled into Node:
+
+```bash
+# 1. Build Node from source with OTA support (slow, one-time)
+js2bin --ci --node=22.22.0 --size=2MB --cache --enable-ota
+
+# 2. Embed your app into the OTA-enabled cached binary (fast)
+js2bin --build --app=/path/to/app.js --node=22.22.0 --cache --enable-ota --name=MyApp
+```
+
+You can optionally bake a signing public key into the binary at step 1:
+
+```bash
+js2bin --ci --node=22.22.0 --size=2MB --cache --enable-ota --signing-public-key=ota-signing.pub
+```
+
+## Creating an OTA update bundle
+
+```bash
+js2bin --ota --app=/path/to/updated-app.js --signing-key=ota-signing.key --output=./ota-bundle/
+```
+
+This produces three artifacts:
+- `bundle.js` — brotli-compressed, base64-encoded JavaScript
+- `bundle.js.sig` — ECDSA P-256 signature (DER-encoded)
+- `bundle.js.sha256` — SHA-256 checksum
+
+## Deploying an OTA update
+
+Place the bundle artifacts where the binary will find them:
+
+```
+<binary-dir>/
+  myapp                    ← your OTA-enabled binary
+  ota/
+    current/
+      bundle.js            ← OTA bundle
+      bundle.js.sig        ← signature
+    trusted-keys/
+      signing.pub          ← public key (if not embedded at build time)
+```
+
+The binary looks for bundles at `<binary-dir>/ota/current/` by default. Override this with the `CRIBL_OTA_DIR` environment variable.
+
+## Signature verification
+
+The binary verifies OTA bundles using ECDSA P-256 (SHA-256). Keys can come from two sources:
+
+1. **Embedded key** — baked in at build time via `--signing-public-key`
+2. **Trusted-keys directory** — `<binary-dir>/ota/trusted-keys/*.pub` files
+
+Both sources are checked. This supports key rotation: deploy new keys to the trusted-keys directory before retiring old ones.
+
+If no keys are available, OTA bundles are rejected. If signature verification fails, the binary falls back to the embedded app and logs a warning to stderr.
+
+## Generating signing keys
+
+```bash
+# Generate ECDSA P-256 private key
+openssl ecparam -name prime256v1 -genkey -noout -out ota-signing.key
+
+# Extract public key
+openssl ec -in ota-signing.key -pubout -out ota-signing.pub
 ```
 
 # Code changes 

@@ -47,8 +47,10 @@ const darwinArch = {
   x64: 'x86_64',
 };
 
-function buildName(platform, arch, placeHolderSizeMB, version, buildVersion) {
-  return `${platform}-${arch}-${version}-${buildVersion}-${placeHolderSizeMB}MB`;
+function buildName(platform, arch, placeHolderSizeMB, version, buildVersion, enableOta) {
+  let name = `${platform}-${arch}-${version}-${buildVersion}-${placeHolderSizeMB}MB`;
+  if (enableOta) name += '-ota';
+  return name;
 }
 
 function commitDirSuffix(commitHash) {
@@ -66,7 +68,7 @@ function parseSemverFromDescribe(desc) {
 }
 
 class NodeJsBuilder {
-  constructor(cwd, version, mainAppFile, appName, patchDir, buildVersion, commitHash) {
+  constructor(cwd, version, mainAppFile, appName, patchDir, buildVersion, commitHash, signingPublicKey, enableOta) {
     this.version = version;
     this.appFile = resolve(mainAppFile);
     this.appName = appName;
@@ -95,6 +97,8 @@ class NodeJsBuilder {
     this.placeHolderSizeMB = -1;
     this.builderImageVersion = 3;
     this.commitHash = commitHash;
+    this.signingPublicKey = signingPublicKey || '';
+    this.enableOta = !!enableOta;
   }
 
   static platform() {
@@ -166,7 +170,7 @@ class NodeJsBuilder {
 
   downloadCachedBuild(platform, arch, customDownloadUrl, placeHolderSizeMB) {
     placeHolderSizeMB = placeHolderSizeMB || this.placeHolderSizeMB;
-    const name = buildName(platform, arch, placeHolderSizeMB, this.version, this.buildVersion);
+    const name = buildName(platform, arch, placeHolderSizeMB, this.version, this.buildVersion, this.enableOta);
     const filename = join(this.cacheDir, name);
     if (fs.existsSync(filename)) {
       log(`build name=${name} already downloaded, using it`);
@@ -182,7 +186,7 @@ class NodeJsBuilder {
     if (!name) {
       arch = NodeJsBuilder.getArch(arch);
       const platform = prettyPlatform[process.platform] + (ptrCompression ? '-ptrc' : '');
-      name = buildName(platform, arch, this.placeHolderSizeMB, this.version, this.buildVersion);
+      name = buildName(platform, arch, this.placeHolderSizeMB, this.version, this.buildVersion, this.enableOta);
     }
 
     let p = Promise.resolve();
@@ -264,14 +268,25 @@ class NodeJsBuilder {
   }
 
   prepareNodeJsBuild() {
-    // install _third_party_main.js
+    // install _third_party_main.js — pick OTA or non-OTA version
     // install app_main.js
     const appMainPath = this.nodePath('lib', '_js2bin_app_main.js');
     return Promise.resolve()
-      .then(() => copyFileAsync(
-        join(this.srcDir, '_third_party_main.js'), // this is the entrypoint to the light wrapper that js2bin inserts
-        this.nodePath('lib', '_third_party_main.js')
-      ))
+      .then(() => {
+        const srcFile = this.enableOta ? '_third_party_main_ota.js' : '_third_party_main.js';
+        let tpmContent = fs.readFileSync(join(this.srcDir, srcFile), 'utf8');
+
+        if (this.enableOta && this.signingPublicKey) {
+          const keyContent = fs.readFileSync(this.signingPublicKey, 'utf8');
+          tpmContent = tpmContent.replace(
+            "const EMBEDDED_SIGNING_PUBLIC_KEY = '__JS2BIN_SIGNING_PUBLIC_KEY__';",
+            `const EMBEDDED_SIGNING_PUBLIC_KEY = ${JSON.stringify(keyContent)};`
+          );
+        }
+
+        const destPath = this.nodePath('lib', '_third_party_main.js');
+        fs.writeFileSync(destPath, tpmContent);
+      })
       .then(() => {
         const m = /^__(\d+)MB__$/i.exec(basename(this.appFile)); // placeholder file
         if (m) {

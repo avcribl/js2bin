@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const { NodeJsBuilder } = require('./src/NodeBuilder');
+const { OTABuilder } = require('./src/OTABuilder');
 const { log } = require('./src/util');
 const fs = require('fs');
 
@@ -27,6 +28,16 @@ command-args: take the form of --name=value
               e.g. --build-version=v2
   --download-url: (opt) Custom URL to download pre-built binaries from
                 e.g. --download-url=https://example.com/binaries/
+  --enable-ota: (opt) Use an OTA-enabled cached binary (built via --ci --enable-ota).
+                Disabled by default.
+
+--ota: build a signed OTA bundle from a JS application
+  --app:      Path to your (bundled) application
+              e.g. --app=/path/to/app/index.js
+  --signing-key: Path to ECDSA P-256 private key PEM file for signing
+              e.g. --signing-key=/path/to/ota-signing.key
+  --output:   (opt) Output directory (default: ./ota-bundle/)
+              e.g. --output=/path/to/output
 
 --ci: build NodeJS with preallocated space for embedding applications
   --node: NodeJS version to build from source, can specify more than one. 
@@ -41,6 +52,11 @@ command-args: take the form of --name=value
   --container: (opt) build using builder container rather than local dev tools
   --arch:      (opt) build on a specific architecture
   --pointer-compress:  (opt) whether to enable pointer compression
+  --enable-ota: (opt) Compile the OTA runtime into the binary. Without this,
+                no OTA code exists in the binary.
+  --signing-public-key: (opt) Path to ECDSA P-256 public key PEM file to embed.
+                Requires --enable-ota.
+                e.g. --signing-public-key=/path/to/ota-signing.pub
 
 --help: print this help message
 `);
@@ -70,8 +86,8 @@ function parseArgs() {
   }
 
   // console.log(args);
-  if (!args.build && !args.ci) {
-    return usage('must use either --build or --ci');
+  if (!args.build && !args.ci && !args.ota) {
+    return usage('must use either --build, --ci, or --ota');
   }
   args.node = (args.node || '10.16.0');
   args.platform = (args.platform || NodeJsBuilder.platform());
@@ -79,6 +95,14 @@ function parseArgs() {
   args.ptrCompression = (args['pointer-compress'] == 'true');
   args.buildVersion = (args['build-version'] || 'v1');
   args.downloadUrl = (args['download-url'] || undefined);
+  args.enableOta = (args['enable-ota'] === true);
+  args.signingPublicKey = (args['signing-public-key'] || undefined);
+  if (args.signingPublicKey && !args.enableOta) {
+    return usage('--signing-public-key requires --enable-ota');
+  }
+  if (args.signingPublicKey && !args.ci) {
+    return usage('--signing-public-key is only supported with --ci (key is embedded at compile time)');
+  }
   return args;
 }
 
@@ -101,7 +125,7 @@ if (args.build) {
   const plats = asArray(args.platform);
   versions.forEach(version => {
     plats.forEach(plat => {
-      const builder = new NodeJsBuilder(args.dir, version, app, args.name, undefined, args.buildVersion);
+      const builder = new NodeJsBuilder(args.dir, version, app, args.name, undefined, args.buildVersion, undefined, undefined, args.enableOta);
       p = p.then(() => {
         const arch = args.arch || 'x64';
         log(`building for version=${version}, plat=${plat} app=${app}} arch=${arch}`);
@@ -111,6 +135,27 @@ if (args.build) {
     });
   });
   p = p.catch(err => { log(err); process.exitCode = 1; });
+} else if (args.ota) {
+  const app = args.app;
+  if (!app) usage('missing required arg: --app');
+  if (!fs.existsSync(app)) {
+    console.log(`ERROR: file not found: ${app}`);
+    process.exit(1);
+  }
+  if (!args['signing-key']) usage('missing required arg: --signing-key');
+
+  const builder = new OTABuilder({
+    app,
+    signingKey: args['signing-key'],
+    output: args.output || undefined,
+  });
+
+  try {
+    builder.build();
+  } catch (err) {
+    log(err);
+    process.exitCode = 1;
+  }
 } else if (args.ci) {
   const versions = asArray(args.node);
   const archs = asArray(args.arch || 'x64');
@@ -119,7 +164,7 @@ if (args.build) {
     let lastBuilder;
     sizes.forEach(size => {
       archs.forEach(arch => {
-        const builder = new NodeJsBuilder(args.dir, version, size, undefined, undefined, args.buildVersion, args.commitHash);
+        const builder = new NodeJsBuilder(args.dir, version, size, undefined, undefined, args.buildVersion, args.commitHash, args.signingPublicKey, args.enableOta);
         lastBuilder = builder;
         p = p.then(() => {
           log(`building for version=${version}, size=${size} arch=${arch}`);
