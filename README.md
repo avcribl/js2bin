@@ -145,7 +145,7 @@ Place the bundle artifacts where the binary will find them:
       signing.pub          ← public key (if not embedded at build time)
 ```
 
-The binary looks for bundles at `<binary-dir>/ota/current/` by default. Override this with the `CRIBL_OTA_DIR` environment variable.
+The binary looks for bundles at `<binary-dir>/ota/current/` by default. Override this with the `JS2BIN_OTA_DIR` environment variable.
 
 ## Signature verification
 

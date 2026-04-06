@@ -41,7 +41,7 @@ function loadTrustedKeys(trustedKeysDir) {
 }
 
 function tryLoadOTABundle(execDir) {
-  const otaDir = process.env.CRIBL_OTA_DIR || join(execDir, 'ota', 'current');
+  const otaDir = process.env.JS2BIN_OTA_DIR || join(execDir, 'ota', 'current');
 
   const bundlePath = join(otaDir, 'bundle.js');
   const sigPath = join(otaDir, 'bundle.js.sig');

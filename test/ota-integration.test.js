@@ -273,12 +273,12 @@ describe('OTA Integration: Full Binary Flow', async () => {
     assert.ok(result.stdout.includes('v2-ok'), `Expected OTA output "v2-ok", got: ${result.stdout}`);
   });
 
-  it('should load OTA bundle via CRIBL_OTA_DIR env var', async () => {
+  it('should load OTA bundle via JS2BIN_OTA_DIR env var', async () => {
     const customOtaDir = path.join(tmpDir, 'custom-ota-location');
     installTrustedKey();
     await buildOtaBundle('console.log("env-var-ok");', customOtaDir);
 
-    const result = await runBinary(binPath, { env: { CRIBL_OTA_DIR: customOtaDir } });
+    const result = await runBinary(binPath, { env: { JS2BIN_OTA_DIR: customOtaDir } });
     assert.equal(result.code, 0, `Binary failed: ${result.stderr}`);
     assert.ok(result.stdout.includes('env-var-ok'), `Expected OTA output "env-var-ok", got: ${result.stdout}`);
   });
