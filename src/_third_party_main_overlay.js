@@ -5,7 +5,7 @@ const { join, dirname } = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 
-// --- OTA Overlay ---
+// --- Overlay Loader ---
 
 const EMBEDDED_SIGNING_PUBLIC_KEY = '__JS2BIN_SIGNING_PUBLIC_KEY__';
 
@@ -40,11 +40,11 @@ function loadTrustedKeys(trustedKeysDir) {
   return keys;
 }
 
-function tryLoadOTABundle(execDir) {
-  const otaDir = process.env.JS2BIN_OTA_DIR || join(execDir, 'ota', 'current');
+function tryLoadOverlayBundle(execDir) {
+  const overlayDir = process.env.JS2BIN_OVERLAY_DIR || join(execDir, 'overlay', 'current');
 
-  const bundlePath = join(otaDir, 'bundle.js');
-  const sigPath = join(otaDir, 'bundle.js.sig');
+  const bundlePath = join(overlayDir, 'bundle.js');
+  const sigPath = join(overlayDir, 'bundle.js.sig');
 
   if (!fs.existsSync(bundlePath) || !fs.existsSync(sigPath)) {
     return null;
@@ -57,15 +57,15 @@ function tryLoadOTABundle(execDir) {
     bundleData = fs.readFileSync(bundlePath);
     sigData = fs.readFileSync(sigPath);
   } catch (err) {
-    process.stderr.write(`[js2bin] OTA: failed to read bundle files: ${err.message}\n`);
+    process.stderr.write(`[js2bin] overlay: failed to read bundle files: ${err.message}\n`);
     return null;
   }
 
-  const trustedKeysDir = join(execDir, 'ota', 'trusted-keys');
+  const trustedKeysDir = join(execDir, 'overlay', 'trusted-keys');
   const allKeys = [EMBEDDED_SIGNING_PUBLIC_KEY, ...loadTrustedKeys(trustedKeysDir)];
 
   if (allKeys.length === 0) {
-    process.stderr.write('[js2bin] OTA: no signing keys available (no embedded key, no trusted-keys directory). Ignoring OTA bundle.\n');
+    process.stderr.write('[js2bin] overlay: no signing keys available (no embedded key, no trusted-keys directory). Ignoring overlay bundle.\n');
     return null;
   }
 
@@ -78,11 +78,11 @@ function tryLoadOTABundle(execDir) {
   }
 
   if (!signatureValid) {
-    process.stderr.write('[js2bin] OTA: signature verification failed — bundle is unsigned or tampered. Falling back to embedded JS.\n');
+    process.stderr.write('[js2bin] overlay: signature verification failed — bundle is unsigned or tampered. Falling back to embedded JS.\n');
     return null;
   }
 
-  process.stderr.write(`[js2bin] OTA: loaded valid bundle from ${otaDir}\n`);
+  process.stderr.write(`[js2bin] overlay: loaded valid bundle from ${overlayDir}\n`);
   return bundleData.toString('utf8');
 }
 
@@ -106,15 +106,15 @@ const filename = join(dirname(process.execPath), `${appName.trim()}.js`);
 
 const embeddedSource = parts[1];
 
-// Try OTA overlay
+// Try overlay bundle
 let activeSource = embeddedSource;
 try {
-  const otaBundle = tryLoadOTABundle(dirname(process.execPath));
-  if (otaBundle) {
-    activeSource = otaBundle;
+  const overlayBundle = tryLoadOverlayBundle(dirname(process.execPath));
+  if (overlayBundle) {
+    activeSource = overlayBundle;
   }
 } catch (err) {
-  process.stderr.write(`[js2bin] OTA: unexpected error during overlay load: ${err.message}. Falling back to embedded JS.\n`);
+  process.stderr.write(`[js2bin] overlay: unexpected error during overlay load: ${err.message}. Falling back to embedded JS.\n`);
 }
 
 // here we turn what looks like an internal module to an non-internal one
@@ -129,7 +129,7 @@ try {
   decompressedSource = brotliDecompressSync(Buffer.from(activeSource, 'base64'), { chunkSize: 128 * 1024 * 1024 }).toString();
 } catch (err) {
   if (activeSource !== embeddedSource) {
-    process.stderr.write(`[js2bin] OTA: failed to decompress OTA bundle: ${err.message}. Falling back to embedded JS.\n`);
+    process.stderr.write(`[js2bin] overlay: failed to decompress overlay bundle: ${err.message}. Falling back to embedded JS.\n`);
     decompressedSource = brotliDecompressSync(Buffer.from(embeddedSource, 'base64'), { chunkSize: 128 * 1024 * 1024 }).toString();
   } else {
     throw err;

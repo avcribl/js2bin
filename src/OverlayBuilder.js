@@ -5,21 +5,21 @@ const fs = require('fs');
 const { join } = require('path');
 const { log } = require('./util');
 
-class OTABuilder {
+class OverlayBuilder {
   /**
    * @param {object} opts
    * @param {string} opts.app - Path to the JS app file to bundle
    * @param {string} opts.signingKey - Path to ECDSA P-256 private key PEM file
-   * @param {string} [opts.output] - Output directory (default: ./ota-bundle/)
+   * @param {string} [opts.output] - Output directory (default: ./overlay-bundle/)
    */
   constructor(opts) {
     this.app = opts.app;
     this.signingKey = opts.signingKey;
-    this.output = opts.output || './ota-bundle';
+    this.output = opts.output || './overlay-bundle';
   }
 
   /**
-   * Compress and base64-encode a JS file, matching the format the OTA loader expects.
+   * Compress and base64-encode a JS file, matching the format the overlay loader expects.
    * This is the same encoding used by NodeJsBuilder.getAppContentToBundle() for parts[1].
    * @param {string} appPath
    * @returns {string} base64-encoded brotli-compressed content
@@ -49,13 +49,13 @@ class OTABuilder {
   }
 
   /**
-   * Build the OTA bundle artifacts: bundle.js, bundle.js.sig, bundle.js.sha256.
+   * Build the Overlay bundle artifacts: bundle.js, bundle.js.sig, bundle.js.sha256.
    * @returns {{ bundlePath: string, sigPath: string, sha256Path: string }}
    */
   build() {
     // Compress and encode the app
     log(`compressing ${this.app} ...`);
-    const bundleContent = OTABuilder.compressApp(this.app);
+    const bundleContent = OverlayBuilder.compressApp(this.app);
     const bundleBuffer = Buffer.from(bundleContent, 'utf8');
 
     // Read the private key
@@ -63,7 +63,7 @@ class OTABuilder {
 
     // Sign the bundle
     log('signing bundle ...');
-    const signature = OTABuilder.sign(bundleBuffer, privateKeyPem);
+    const signature = OverlayBuilder.sign(bundleBuffer, privateKeyPem);
 
     // Compute SHA-256 checksum
     const checksum = crypto.createHash('sha256').update(bundleBuffer).digest('hex');
@@ -79,7 +79,7 @@ class OTABuilder {
     fs.writeFileSync(sigPath, signature);
     fs.writeFileSync(sha256Path, checksum);
 
-    log(`OTA bundle written to ${this.output}/`);
+    log(`Overlay bundle written to ${this.output}/`);
     log(`  bundle.js         (${bundleBuffer.length} bytes)`);
     log(`  bundle.js.sig     (${signature.length} bytes)`);
     log(`  bundle.js.sha256  ${checksum}`);
@@ -88,4 +88,4 @@ class OTABuilder {
   }
 }
 
-module.exports = { OTABuilder };
+module.exports = { OverlayBuilder };

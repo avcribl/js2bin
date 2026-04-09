@@ -6,7 +6,7 @@ const path = require('path');
 const os = require('os');
 const zlib = require('zlib');
 
-const { OTABuilder } = require('../src/OTABuilder');
+const { OverlayBuilder } = require('../src/OverlayBuilder');
 
 function generateKeypair() {
   return crypto.generateKeyPairSync('ec', {
@@ -16,16 +16,16 @@ function generateKeypair() {
   });
 }
 
-describe('OTABuilder', () => {
+describe('OverlayBuilder', () => {
   let tmpDir;
   let keypair;
   let appFile;
   let keyFile;
 
-  const appContent = 'console.log("hello from OTA");';
+  const appContent = 'console.log("hello from overlay");';
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ota-builder-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'overlay-builder-test-'));
     keypair = generateKeypair();
 
     appFile = path.join(tmpDir, 'app.js');
@@ -41,7 +41,7 @@ describe('OTABuilder', () => {
 
   describe('compressApp', () => {
     it('should produce base64-encoded brotli-compressed content', () => {
-      const encoded = OTABuilder.compressApp(appFile);
+      const encoded = OverlayBuilder.compressApp(appFile);
       // Should be valid base64
       const buf = Buffer.from(encoded, 'base64');
       assert.ok(buf.length > 0);
@@ -54,7 +54,7 @@ describe('OTABuilder', () => {
   describe('sign', () => {
     it('should produce a valid ECDSA signature', () => {
       const data = Buffer.from('test data');
-      const sig = OTABuilder.sign(data, keypair.privateKey);
+      const sig = OverlayBuilder.sign(data, keypair.privateKey);
       assert.ok(Buffer.isBuffer(sig));
       assert.ok(sig.length > 0);
       const verify = crypto.createVerify('SHA256');
@@ -67,7 +67,7 @@ describe('OTABuilder', () => {
   describe('build', () => {
     it('should produce all three artifacts', () => {
       const outputDir = path.join(tmpDir, 'out');
-      const builder = new OTABuilder({
+      const builder = new OverlayBuilder({
         app: appFile,
         signingKey: keyFile,
         output: outputDir,
@@ -82,7 +82,7 @@ describe('OTABuilder', () => {
 
     it('should produce a bundle that decompresses to the original JS', () => {
       const outputDir = path.join(tmpDir, 'out');
-      const builder = new OTABuilder({
+      const builder = new OverlayBuilder({
         app: appFile,
         signingKey: keyFile,
         output: outputDir,
@@ -97,7 +97,7 @@ describe('OTABuilder', () => {
 
     it('should produce a valid signature verifiable with the public key', () => {
       const outputDir = path.join(tmpDir, 'out');
-      const builder = new OTABuilder({
+      const builder = new OverlayBuilder({
         app: appFile,
         signingKey: keyFile,
         output: outputDir,
@@ -115,7 +115,7 @@ describe('OTABuilder', () => {
 
     it('should write a correct sha256 checksum', () => {
       const outputDir = path.join(tmpDir, 'out');
-      const builder = new OTABuilder({
+      const builder = new OverlayBuilder({
         app: appFile,
         signingKey: keyFile,
         output: outputDir,
@@ -132,7 +132,7 @@ describe('OTABuilder', () => {
     it('should produce a bundle that decompresses to the original JS via the full artifact set', () => {
       // End-to-end: build artifacts, then verify bundle + sig + checksum are consistent
       const outputDir = path.join(tmpDir, 'out');
-      const builder = new OTABuilder({
+      const builder = new OverlayBuilder({
         app: appFile,
         signingKey: keyFile,
         output: outputDir,
@@ -155,7 +155,7 @@ describe('OTABuilder', () => {
 
     it('should create output directory if it does not exist', () => {
       const outputDir = path.join(tmpDir, 'nested', 'deep', 'out');
-      const builder = new OTABuilder({
+      const builder = new OverlayBuilder({
         app: appFile,
         signingKey: keyFile,
         output: outputDir,

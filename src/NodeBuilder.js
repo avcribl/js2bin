@@ -47,9 +47,9 @@ const darwinArch = {
   x64: 'x86_64',
 };
 
-function buildName(platform, arch, placeHolderSizeMB, version, buildVersion, enableOta) {
+function buildName(platform, arch, placeHolderSizeMB, version, buildVersion, enableOverlay) {
   let name = `${platform}-${arch}-${version}-${buildVersion}-${placeHolderSizeMB}MB`;
-  if (enableOta) name += '-ota';
+  if (enableOverlay) name += '-overlay';
   return name;
 }
 
@@ -68,7 +68,7 @@ function parseSemverFromDescribe(desc) {
 }
 
 class NodeJsBuilder {
-  constructor(cwd, version, mainAppFile, appName, patchDir, buildVersion, commitHash, signingPublicKey, enableOta) {
+  constructor(cwd, version, mainAppFile, appName, patchDir, buildVersion, commitHash, signingPublicKey, enableOverlay) {
     this.version = version;
     this.appFile = resolve(mainAppFile);
     this.appName = appName;
@@ -98,7 +98,7 @@ class NodeJsBuilder {
     this.builderImageVersion = 3;
     this.commitHash = commitHash;
     this.signingPublicKey = signingPublicKey || '';
-    this.enableOta = !!enableOta;
+    this.enableOverlay = !!enableOverlay;
   }
 
   static platform() {
@@ -170,7 +170,7 @@ class NodeJsBuilder {
 
   downloadCachedBuild(platform, arch, customDownloadUrl, placeHolderSizeMB) {
     placeHolderSizeMB = placeHolderSizeMB || this.placeHolderSizeMB;
-    const name = buildName(platform, arch, placeHolderSizeMB, this.version, this.buildVersion, this.enableOta);
+    const name = buildName(platform, arch, placeHolderSizeMB, this.version, this.buildVersion, this.enableOverlay);
     const filename = join(this.cacheDir, name);
     if (fs.existsSync(filename)) {
       log(`build name=${name} already downloaded, using it`);
@@ -186,7 +186,7 @@ class NodeJsBuilder {
     if (!name) {
       arch = NodeJsBuilder.getArch(arch);
       const platform = prettyPlatform[process.platform] + (ptrCompression ? '-ptrc' : '');
-      name = buildName(platform, arch, this.placeHolderSizeMB, this.version, this.buildVersion, this.enableOta);
+      name = buildName(platform, arch, this.placeHolderSizeMB, this.version, this.buildVersion, this.enableOverlay);
     }
 
     let p = Promise.resolve();
@@ -268,15 +268,15 @@ class NodeJsBuilder {
   }
 
   prepareNodeJsBuild() {
-    // install _third_party_main.js — pick OTA or non-OTA version
+    // install _third_party_main.js — pick overlay or non-overlay version
     // install app_main.js
     const appMainPath = this.nodePath('lib', '_js2bin_app_main.js');
     return Promise.resolve()
       .then(() => {
-        const srcFile = this.enableOta ? '_third_party_main_ota.js' : '_third_party_main.js';
+        const srcFile = this.enableOverlay ? '_third_party_main_overlay.js' : '_third_party_main.js';
         let tpmContent = fs.readFileSync(join(this.srcDir, srcFile), 'utf8');
 
-        if (this.enableOta && this.signingPublicKey) {
+        if (this.enableOverlay && this.signingPublicKey) {
           const keyContent = fs.readFileSync(this.signingPublicKey, 'utf8');
           tpmContent = tpmContent.replace(
             "const EMBEDDED_SIGNING_PUBLIC_KEY = '__JS2BIN_SIGNING_PUBLIC_KEY__';",
