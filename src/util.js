@@ -97,7 +97,7 @@ async function patchFile(baseDir, patchFile) {
         ]
       })
       .once('exit', code => {
-        if (code !== 0) return reject(new Error(`falied to patch file=${file} with patch=${patchFile} code=${code}`));
+        if (code !== 0) return reject(new Error(`failed to patch in baseDir=${baseDir} patch=${patchFile} code=${code}`));
         return resolve();
       })
       .once('error', reject);

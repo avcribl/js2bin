@@ -93,7 +93,7 @@ class NodeJsBuilder {
     this.cacheDir = join(cwd || process.cwd(), 'cache');
     this.resultFile = isWindows ? join(this.nodeSrcDir, 'Release', 'node.exe') : join(this.nodeSrcDir, 'out', 'Release', 'node');
     this.placeHolderSizeMB = -1;
-    this.builderImageVersion = 3;
+    this.builderImageVersion = 4;
     this.commitHash = commitHash;
   }
 
@@ -130,7 +130,7 @@ class NodeJsBuilder {
 
     if (fs.existsSync(this.nodePath('configure'))) {
       log(`node commit=${this.commitHash} already downloaded and expanded, using it`);
-      return afterSourceReady();
+      return this.inferVersionAndPatchDirFromGit();
     }
     log(`cloning node source for commit=${this.commitHash} ...`);
 
