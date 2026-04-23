@@ -7,7 +7,39 @@ const crypto = require('crypto');
 
 // --- Overlay Loader ---
 
-const EMBEDDED_SIGNING_PUBLIC_KEY = '__JS2BIN_SIGNING_PUBLIC_KEY__';
+// The signing public key lives in a dedicated native module whose backing file
+// (lib/_js2bin_signing_key.js) starts out as a sentinel placeholder and is
+// overwritten at --build time when the user passes --signing-public-key. The
+// sentinel shape mirrors _js2bin_app_main so the same detection works: if the
+// raw module content still starts with backtick+tilde, no key was embedded.
+// Only ECDSA P-256 keys are accepted — matches OverlayBuilder's sign path.
+function extractEmbeddedKey() {
+  let raw;
+  try {
+    raw = process.binding('natives')._js2bin_signing_key;
+  } catch {
+    return null;
+  }
+  if (typeof raw !== 'string' || raw.length === 0) return null;
+  if (raw.startsWith('`~')) return null;
+  const nullIdx = raw.indexOf('\0');
+  const trimmed = (nullIdx > -1 ? raw.substr(0, nullIdx) : raw).trim();
+  if (trimmed.length === 0) return null;
+  try {
+    const key = crypto.createPublicKey(trimmed);
+    const curve = key.asymmetricKeyDetails && key.asymmetricKeyDetails.namedCurve;
+    if (key.asymmetricKeyType !== 'ec' || curve !== 'prime256v1') {
+      process.stderr.write(`[js2bin] overlay: embedded signing key is not ECDSA P-256 (type='${key.asymmetricKeyType}', curve='${curve}'). Ignoring.\n`);
+      return null;
+    }
+  } catch (err) {
+    process.stderr.write(`[js2bin] overlay: embedded signing key failed to parse: ${err.message}. Ignoring.\n`);
+    return null;
+  }
+  return trimmed;
+}
+
+const EMBEDDED_SIGNING_PUBLIC_KEY = extractEmbeddedKey();
 
 function verifySignature(data, signature, publicKeyPem) {
   try {
@@ -18,26 +50,6 @@ function verifySignature(data, signature, publicKeyPem) {
   } catch {
     return false;
   }
-}
-
-function loadTrustedKeys(trustedKeysDir) {
-  const keys = [];
-  try {
-    if (!fs.existsSync(trustedKeysDir)) return keys;
-    const files = fs.readdirSync(trustedKeysDir);
-    for (const file of files) {
-      if (file.endsWith('.pub')) {
-        try {
-          keys.push(fs.readFileSync(join(trustedKeysDir, file), 'utf8'));
-        } catch {
-          // Skip unreadable key files
-        }
-      }
-    }
-  } catch {
-    // Directory read failed — no additional keys
-  }
-  return keys;
 }
 
 function tryLoadOverlayBundle(execDir) {
@@ -61,23 +73,12 @@ function tryLoadOverlayBundle(execDir) {
     return null;
   }
 
-  const trustedKeysDir = join(execDir, 'overlay', 'trusted-keys');
-  const allKeys = [EMBEDDED_SIGNING_PUBLIC_KEY, ...loadTrustedKeys(trustedKeysDir)];
-
-  if (allKeys.length === 0) {
-    process.stderr.write('[js2bin] overlay: no signing keys available (no embedded key, no trusted-keys directory). Ignoring overlay bundle.\n');
+  if (!EMBEDDED_SIGNING_PUBLIC_KEY) {
+    process.stderr.write('[js2bin] overlay: no embedded signing key — binary was not built with --signing-public-key. Ignoring overlay bundle.\n');
     return null;
   }
 
-  let signatureValid = false;
-  for (const key of allKeys) {
-    if (verifySignature(bundleData, sigData, key)) {
-      signatureValid = true;
-      break;
-    }
-  }
-
-  if (!signatureValid) {
+  if (!verifySignature(bundleData, sigData, EMBEDDED_SIGNING_PUBLIC_KEY)) {
     process.stderr.write('[js2bin] overlay: signature verification failed — bundle is unsigned or tampered. Falling back to embedded JS.\n');
     return null;
   }

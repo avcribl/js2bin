@@ -170,6 +170,8 @@ describe('Overlay Integration: Bundle CLI (--overlay)', () => {
 // ---------------------------------------------------------------------------
 
 const DEFAULT_NODE_VERSION = '22.22.0';
+const DEFAULT_BUILD_VERSION = 'v2';
+const DEFAULT_SIZE = '6MB';
 const PLATFORM = process.platform === 'win32' ? 'windows' : process.platform;
 const ARCH = process.arch;
 
@@ -187,11 +189,20 @@ describe('Overlay Integration: Full Binary Flow', async () => {
     const embeddedApp = createApp(setupDir, 'embedded.js', 'console.log("embedded-ok");');
     const binName = path.join(setupDir, 'overlay-integ-test');
 
+    // Single keypair: the public half is embedded at --build time (the only
+    // accepted verifier) and the private half signs every bundle in tests.
+    keypair = generateKeypair();
+    const buildKeyFile = path.join(setupDir, 'signing.pub');
+    fs.writeFileSync(buildKeyFile, keypair.publicKey);
+
     const buildResult = await runCli([
       '--build',
       `--app=${embeddedApp}`,
       `--node=${DEFAULT_NODE_VERSION}`,
+      `--build-version=${DEFAULT_BUILD_VERSION}`,
+      `--size=${DEFAULT_SIZE}`,
       '--enable-overlay',
+      `--signing-public-key=${buildKeyFile}`,
       '--cache',
       `--name=${binName}`,
       `--platform=${PLATFORM}`,
@@ -199,6 +210,7 @@ describe('Overlay Integration: Full Binary Flow', async () => {
     ], { timeout: 60000 });
 
     const builtPath = `${binName}-${PLATFORM}-${ARCH}`;
+    console.log(`Build result: code=${buildResult.code} stdout=${buildResult.stdout} stderr=${buildResult.stderr}`);
     if (buildResult.code === 0 && fs.existsSync(builtPath)) {
       if (process.platform === 'darwin') {
         try { await execFileAsync('codesign', ['--force', '--sign', '-', builtPath]); } catch {}
@@ -220,7 +232,6 @@ describe('Overlay Integration: Full Binary Flow', async () => {
   beforeEach(() => {
     if (skipBinaryTests) return;
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'overlay-binary-test-'));
-    keypair = generateKeypair();
 
     // Copy binary into tmpDir so overlay/ dirs are relative to it
     const binName = path.basename(resolvedBinary);
@@ -254,13 +265,6 @@ describe('Overlay Integration: Full Binary Flow', async () => {
     return outputDir;
   }
 
-  // Helper: set up trusted-keys directory with the test public key
-  function installTrustedKey() {
-    const trustedKeysDir = path.join(tmpDir, 'overlay', 'trusted-keys');
-    fs.mkdirSync(trustedKeysDir, { recursive: true });
-    fs.writeFileSync(path.join(trustedKeysDir, 'test.pub'), keypair.publicKey);
-  }
-
   it('should run embedded app when no overlay bundle is present', async (ctx) => {
     if (skipBinaryTests) return ctx.skip('No overlay-enabled cached binary available');
     const result = await runBinary(binPath);
@@ -271,7 +275,6 @@ describe('Overlay Integration: Full Binary Flow', async () => {
   it('should load overlay bundle that overrides embedded app', async (ctx) => {
     if (skipBinaryTests) return ctx.skip('No overlay-enabled cached binary available');
     const overlayCurrentDir = path.join(tmpDir, 'overlay', 'current');
-    installTrustedKey();
     await buildOverlayBundle('console.log("v2-ok");', overlayCurrentDir);
 
     const result = await runBinary(binPath);
@@ -282,7 +285,6 @@ describe('Overlay Integration: Full Binary Flow', async () => {
   it('should load overlay bundle via JS2BIN_OVERLAY_DIR env var', async (ctx) => {
     if (skipBinaryTests) return ctx.skip('No overlay-enabled cached binary available');
     const customOverlayDir = path.join(tmpDir, 'custom-overlay-location');
-    installTrustedKey();
     await buildOverlayBundle('console.log("env-var-ok");', customOverlayDir);
 
     const result = await runBinary(binPath, { env: { JS2BIN_OVERLAY_DIR: customOverlayDir } });
@@ -293,7 +295,6 @@ describe('Overlay Integration: Full Binary Flow', async () => {
   it('should fall back to embedded app when overlay signature is tampered', async (ctx) => {
     if (skipBinaryTests) return ctx.skip('No overlay-enabled cached binary available');
     const overlayCurrentDir = path.join(tmpDir, 'overlay', 'current');
-    installTrustedKey();
     await buildOverlayBundle('console.log("tampered");', overlayCurrentDir);
 
     // Corrupt the signature
@@ -309,14 +310,118 @@ describe('Overlay Integration: Full Binary Flow', async () => {
     assert.ok(result.stderr.includes('signature verification failed'), `Expected signature error in stderr, got: ${result.stderr}`);
   });
 
-  it('should verify overlay bundle using trusted-keys directory', async (ctx) => {
+  it('should reject overlay bundle signed by a different key', async (ctx) => {
     if (skipBinaryTests) return ctx.skip('No overlay-enabled cached binary available');
     const overlayCurrentDir = path.join(tmpDir, 'overlay', 'current');
-    installTrustedKey();
-    await buildOverlayBundle('console.log("trusted-key-ok");', overlayCurrentDir);
+    const rogue = generateKeypair();
+    const rogueKeyFile = path.join(tmpDir, 'rogue.key');
+    fs.writeFileSync(rogueKeyFile, rogue.privateKey);
+    const appFile = createApp(tmpDir, 'rogue-app.js', 'console.log("rogue-ok");');
+    await runCli([
+      '--overlay',
+      `--app=${appFile}`,
+      `--signing-key=${rogueKeyFile}`,
+      `--output=${overlayCurrentDir}`,
+    ]);
 
     const result = await runBinary(binPath);
-    assert.equal(result.code, 0, `Binary failed: ${result.stderr}`);
-    assert.ok(result.stdout.includes('trusted-key-ok'), `Expected overlay output "trusted-key-ok", got: ${result.stdout}`);
+    assert.ok(!result.stdout.includes('rogue-ok'), 'Binary should not have loaded rogue-signed bundle');
+    assert.ok(result.stderr.includes('signature verification failed'), `Expected signature error in stderr, got: ${result.stderr}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CLI validation: --signing-public-key lives on --build, not --ci
+// ---------------------------------------------------------------------------
+
+describe('Overlay Integration: CLI validation', () => {
+  let tmpDir;
+  let keyFile;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'overlay-cli-'));
+    const kp = generateKeypair();
+    keyFile = path.join(tmpDir, 'signing.pub');
+    fs.writeFileSync(keyFile, kp.publicKey);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('should reject --signing-public-key on --ci', async () => {
+    const result = await runCli([
+      '--ci',
+      `--node=${DEFAULT_NODE_VERSION}`,
+      '--size=2MB',
+      '--enable-overlay',
+      `--signing-public-key=${keyFile}`,
+    ]);
+    assert.notEqual(result.code, 0);
+    assert.ok(
+      /only supported with --build/.test(result.stdout + result.stderr),
+      `Expected CLI error mentioning --build, got: ${result.stdout}${result.stderr}`
+    );
+  });
+
+  it('should reject --build --enable-overlay without --signing-public-key', async () => {
+    const appFile = createApp(tmpDir, 'app.js', 'console.log("x");');
+    const result = await runCli([
+      '--build',
+      `--node=${DEFAULT_NODE_VERSION}`,
+      `--app=${appFile}`,
+      '--enable-overlay',
+    ]);
+    assert.notEqual(result.code, 0);
+    assert.ok(
+      /requires --signing-public-key/.test(result.stdout + result.stderr),
+      `Expected CLI error about missing key, got: ${result.stdout}${result.stderr}`
+    );
+  });
+
+  it('should reject an RSA private key at --overlay time', async () => {
+    const rsa = crypto.generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    });
+    const badKeyFile = path.join(tmpDir, 'rsa.key');
+    fs.writeFileSync(badKeyFile, rsa.privateKey);
+    const appFile = createApp(tmpDir, 'app.js', 'console.log("x");');
+    const result = await runCli([
+      '--overlay',
+      `--app=${appFile}`,
+      `--signing-key=${badKeyFile}`,
+      `--output=${path.join(tmpDir, 'out')}`,
+    ]);
+    assert.notEqual(result.code, 0);
+    assert.ok(
+      /ECDSA P-256/.test(result.stdout + result.stderr),
+      `Expected P-256 error, got: ${result.stdout}${result.stderr}`
+    );
+  });
+
+  it('should reject a P-384 public key at --build time', async () => {
+    const p384 = crypto.generateKeyPairSync('ec', {
+      namedCurve: 'secp384r1',
+      privateKeyEncoding: { type: 'sec1', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    });
+    const badKeyFile = path.join(tmpDir, 'p384.pub');
+    fs.writeFileSync(badKeyFile, p384.publicKey);
+    const appFile = createApp(tmpDir, 'app.js', 'console.log("x");');
+    const result = await runCli([
+      '--build',
+      `--node=${DEFAULT_NODE_VERSION}`,
+      `--app=${appFile}`,
+      '--enable-overlay',
+      `--signing-public-key=${badKeyFile}`,
+      `--name=${path.join(tmpDir, 'bad-build')}`,
+    ]);
+    assert.notEqual(result.code, 0);
+    assert.ok(
+      /ECDSA P-256/.test(result.stdout + result.stderr),
+      `Expected P-256 error, got: ${result.stdout}${result.stderr}`
+    );
   });
 });

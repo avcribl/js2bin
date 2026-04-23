@@ -1,5 +1,5 @@
 
-const { log, download, upload, deleteArtifact, getAssetIdByName, fetch, mkdirp, rmrf, copyFileAsync, runCommand, renameAsync, patchFile } = require('./util');
+const { log, download, upload, deleteArtifact, getAssetIdByName, fetch, mkdirp, rmrf, copyFileAsync, runCommand, renameAsync, patchFile, assertSupportedKey } = require('./util');
 const { brotliCompressSync, createGunzip } = require('zlib');
 const zlib = require('zlib');
 const { join, dirname, basename, parse, resolve } = require('path');
@@ -254,6 +254,17 @@ class NodeJsBuilder {
     return Buffer.from('`' + appMainCont + '`');
   }
 
+  // 512 B region reserved for the overlay signing public key. Sized to fit a
+  // PEM-encoded ECDSA P-256 public key (~200 B) with generous slack. Written
+  // at --ci time and overwritten at --build time when the user passes
+  // --signing-public-key. Uses the same sentinel+indexOf scheme as the app
+  // bundle placeholder so the runtime can detect an unmodified slot.
+  getKeyPlaceholderContent() {
+    const KEY_PLACEHOLDER_SIZE = 512;
+    const line = '~K~e~y~P~l~H~d~\n';
+    return Buffer.from('`' + line.repeat(KEY_PLACEHOLDER_SIZE / line.length) + '`');
+  }
+
   getAppContentToBundle() {
     const mainAppFileCont = brotliCompressSync(
       fs.readFileSync(this.appFile),
@@ -270,20 +281,13 @@ class NodeJsBuilder {
   prepareNodeJsBuild() {
     // install _third_party_main.js — pick overlay or non-overlay version
     // install app_main.js
+    // install _js2bin_signing_key.js placeholder (when overlay is enabled)
     const appMainPath = this.nodePath('lib', '_js2bin_app_main.js');
+    const keyPath = this.nodePath('lib', '_js2bin_signing_key.js');
     return Promise.resolve()
       .then(() => {
         const srcFile = this.enableOverlay ? '_third_party_main_overlay.js' : '_third_party_main.js';
-        let tpmContent = fs.readFileSync(join(this.srcDir, srcFile), 'utf8');
-
-        if (this.enableOverlay && this.signingPublicKey) {
-          const keyContent = fs.readFileSync(this.signingPublicKey, 'utf8');
-          tpmContent = tpmContent.replace(
-            "const EMBEDDED_SIGNING_PUBLIC_KEY = '__JS2BIN_SIGNING_PUBLIC_KEY__';",
-            `const EMBEDDED_SIGNING_PUBLIC_KEY = ${JSON.stringify(keyContent)};`
-          );
-        }
-
+        const tpmContent = fs.readFileSync(join(this.srcDir, srcFile), 'utf8');
         const destPath = this.nodePath('lib', '_third_party_main.js');
         fs.writeFileSync(destPath, tpmContent);
       })
@@ -294,6 +298,11 @@ class NodeJsBuilder {
           fs.writeFileSync(appMainPath, this.getPlaceholderContent(this.placeHolderSizeMB));
         } else {
           fs.writeFileSync(appMainPath, this.getAppContentToBundle());
+        }
+      })
+      .then(() => {
+        if (this.enableOverlay) {
+          fs.writeFileSync(keyPath, this.getKeyPlaceholderContent());
         }
       });
   }
@@ -419,6 +428,14 @@ class NodeJsBuilder {
   }
 
   buildFromCached(platform = 'linux', arch = 'x64', outFile = undefined, cache = false, size, customDownloadUrl) {
+    // Validate the signing key before any I/O so bad inputs fail fast without
+    // a cache download.
+    let keyPem = null;
+    if (this.enableOverlay && this.signingPublicKey) {
+      keyPem = fs.readFileSync(this.signingPublicKey);
+      assertSupportedKey(keyPem, { type: 'public', source: this.signingPublicKey });
+    }
+
     const mainAppFileCont = this.getAppContentToBundle();
     this.placeHolderSizeMB = Math.ceil(mainAppFileCont.length / 1024 / 1024); // 2, 4, 6, 8...
     if (this.placeHolderSizeMB % 2 !== 0) {
@@ -445,6 +462,27 @@ class NodeJsBuilder {
 
         execFileCont.fill(0, placeholderIdx, placeholderIdx + placeholder.length);
         execFileCont.write(mainAppFileCont, placeholderIdx);
+
+        if (keyPem) {
+          const keyPlaceholder = this.getKeyPlaceholderContent();
+          const keyIdx = execFileCont.indexOf(keyPlaceholder);
+          if (keyIdx < 0) {
+            throw new Error(
+              `Could not find signing-key placeholder in file=${cachedFile}. ` +
+              `The cached binary must be built with --ci --enable-overlay.`
+            );
+          }
+          if (keyPem.length > keyPlaceholder.length) {
+            throw new Error(
+              `Signing public key (${keyPem.length} bytes) does not fit in the ` +
+              `reserved ${keyPlaceholder.length}-byte placeholder.`
+            );
+          }
+          execFileCont.fill(0, keyIdx, keyIdx + keyPlaceholder.length);
+          keyPem.copy(execFileCont, keyIdx);
+          log(`embedded signing public key (${keyPem.length} bytes) at offset ${keyIdx}`);
+        }
+
         log(`writing native binary ${outFile}`);
         return mkdirp(dirname(outFile))
           .then(() => fs.writeFileSync(outFile, execFileCont));
