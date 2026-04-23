@@ -74,7 +74,7 @@ describe('Overlay Integration: Bundle CLI (--overlay)', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('should produce all three bundle artifacts', async () => {
+  it('should produce both bundle artifacts', async () => {
     const outputDir = path.join(tmpDir, 'out');
     const result = await runCli([
       '--overlay',
@@ -86,7 +86,6 @@ describe('Overlay Integration: Bundle CLI (--overlay)', () => {
     assert.equal(result.code, 0, `CLI failed: ${result.stderr}`);
     assert.ok(fs.existsSync(path.join(outputDir, 'bundle.js')));
     assert.ok(fs.existsSync(path.join(outputDir, 'bundle.js.sig')));
-    assert.ok(fs.existsSync(path.join(outputDir, 'bundle.js.sha256')));
   });
 
   it('should produce a bundle that decompresses to the original JS', async () => {
@@ -118,21 +117,6 @@ describe('Overlay Integration: Bundle CLI (--overlay)', () => {
     verify.update(bundleData);
     verify.end();
     assert.ok(verify.verify({ key: keypair.publicKey, dsaEncoding: 'der' }, sigData));
-  });
-
-  it('should write a correct sha256 checksum', async () => {
-    const outputDir = path.join(tmpDir, 'out');
-    await runCli([
-      '--overlay',
-      `--app=${appFile}`,
-      `--signing-key=${keyFile}`,
-      `--output=${outputDir}`,
-    ]);
-
-    const bundleData = fs.readFileSync(path.join(outputDir, 'bundle.js'));
-    const expectedChecksum = crypto.createHash('sha256').update(bundleData).digest('hex');
-    const writtenChecksum = fs.readFileSync(path.join(outputDir, 'bundle.js.sha256'), 'utf8');
-    assert.equal(writtenChecksum, expectedChecksum);
   });
 
   it('should fail without --signing-key', async () => {

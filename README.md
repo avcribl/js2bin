@@ -124,10 +124,9 @@ Because step 1 produces a keyless artifact, the overlay-enabled binaries publish
 js2bin --overlay --app=/path/to/updated-app.js --signing-key=overlay-signing.key --output=./overlay-bundle/
 ```
 
-This produces three artifacts:
+This produces two artifacts:
 - `bundle.js` — brotli-compressed, base64-encoded JavaScript
 - `bundle.js.sig` — ECDSA P-256 signature (DER-encoded)
-- `bundle.js.sha256` — SHA-256 checksum
 
 ## Deploying an overlay update
 

@@ -65,7 +65,7 @@ describe('OverlayBuilder', () => {
   });
 
   describe('build', () => {
-    it('should produce all three artifacts', () => {
+    it('should produce both artifacts', () => {
       const outputDir = path.join(tmpDir, 'out');
       const builder = new OverlayBuilder({
         app: appFile,
@@ -77,7 +77,6 @@ describe('OverlayBuilder', () => {
 
       assert.ok(fs.existsSync(result.bundlePath));
       assert.ok(fs.existsSync(result.sigPath));
-      assert.ok(fs.existsSync(result.sha256Path));
     });
 
     it('should produce a bundle that decompresses to the original JS', () => {
@@ -113,24 +112,7 @@ describe('OverlayBuilder', () => {
       assert.ok(verify.verify({ key: keypair.publicKey, dsaEncoding: 'der' }, sigData));
     });
 
-    it('should write a correct sha256 checksum', () => {
-      const outputDir = path.join(tmpDir, 'out');
-      const builder = new OverlayBuilder({
-        app: appFile,
-        signingKey: keyFile,
-        output: outputDir,
-      });
-
-      builder.build();
-
-      const bundleData = fs.readFileSync(path.join(outputDir, 'bundle.js'));
-      const expectedChecksum = crypto.createHash('sha256').update(bundleData).digest('hex');
-      const writtenChecksum = fs.readFileSync(path.join(outputDir, 'bundle.js.sha256'), 'utf8');
-      assert.equal(writtenChecksum, expectedChecksum);
-    });
-
     it('should produce a bundle that decompresses to the original JS via the full artifact set', () => {
-      // End-to-end: build artifacts, then verify bundle + sig + checksum are consistent
       const outputDir = path.join(tmpDir, 'out');
       const builder = new OverlayBuilder({
         app: appFile,

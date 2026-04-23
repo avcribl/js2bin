@@ -49,8 +49,8 @@ class OverlayBuilder {
   }
 
   /**
-   * Build the Overlay bundle artifacts: bundle.js, bundle.js.sig, bundle.js.sha256.
-   * @returns {{ bundlePath: string, sigPath: string, sha256Path: string }}
+   * Build the Overlay bundle artifacts: bundle.js, bundle.js.sig.
+   * @returns {{ bundlePath: string, sigPath: string }}
    */
   build() {
     // Compress and encode the app
@@ -66,26 +66,20 @@ class OverlayBuilder {
     log('signing bundle ...');
     const signature = OverlayBuilder.sign(bundleBuffer, privateKeyPem);
 
-    // Compute SHA-256 checksum
-    const checksum = crypto.createHash('sha256').update(bundleBuffer).digest('hex');
-
     // Write artifacts
     fs.mkdirSync(this.output, { recursive: true });
 
     const bundlePath = join(this.output, 'bundle.js');
     const sigPath = join(this.output, 'bundle.js.sig');
-    const sha256Path = join(this.output, 'bundle.js.sha256');
 
     fs.writeFileSync(bundlePath, bundleBuffer);
     fs.writeFileSync(sigPath, signature);
-    fs.writeFileSync(sha256Path, checksum);
 
     log(`Overlay bundle written to ${this.output}/`);
-    log(`  bundle.js         (${bundleBuffer.length} bytes)`);
-    log(`  bundle.js.sig     (${signature.length} bytes)`);
-    log(`  bundle.js.sha256  ${checksum}`);
+    log(`  bundle.js      (${bundleBuffer.length} bytes)`);
+    log(`  bundle.js.sig  (${signature.length} bytes)`);
 
-    return { bundlePath, sigPath, sha256Path };
+    return { bundlePath, sigPath };
   }
 }
 
