@@ -294,6 +294,38 @@ describe('Overlay Integration: Full Binary Flow', async () => {
     assert.ok(result.stderr.includes('signature verification failed'), `Expected signature error in stderr, got: ${result.stderr}`);
   });
 
+  it('should treat empty bundle.js as no overlay (silent fallback)', async (ctx) => {
+    if (skipBinaryTests) return ctx.skip('No overlay-enabled cached binary available');
+    const overlayCurrentDir = path.join(tmpDir, 'overlay', 'current');
+    await buildOverlayBundle('console.log("should-not-run");', overlayCurrentDir);
+    fs.writeFileSync(path.join(overlayCurrentDir, 'bundle.js'), '');
+
+    const result = await runBinary(binPath);
+    assert.equal(result.code, 0, `Binary failed: ${result.stderr}`);
+    assert.ok(result.stdout.includes('embedded-ok'), `Expected embedded fallback, got: ${result.stdout}`);
+    assert.ok(!result.stdout.includes('should-not-run'), 'Empty bundle.js should not execute overlay');
+    assert.ok(!result.stderr.includes('signature verification failed'),
+      `Empty bundle.js should not produce signature warning, got stderr: ${result.stderr}`);
+    assert.ok(!result.stderr.includes('failed to read'),
+      `Empty bundle.js should not produce read-error warning, got stderr: ${result.stderr}`);
+  });
+
+  it('should treat empty bundle.js.sig as no overlay (silent fallback)', async (ctx) => {
+    if (skipBinaryTests) return ctx.skip('No overlay-enabled cached binary available');
+    const overlayCurrentDir = path.join(tmpDir, 'overlay', 'current');
+    await buildOverlayBundle('console.log("should-not-run");', overlayCurrentDir);
+    fs.writeFileSync(path.join(overlayCurrentDir, 'bundle.js.sig'), '');
+
+    const result = await runBinary(binPath);
+    assert.equal(result.code, 0, `Binary failed: ${result.stderr}`);
+    assert.ok(result.stdout.includes('embedded-ok'), `Expected embedded fallback, got: ${result.stdout}`);
+    assert.ok(!result.stdout.includes('should-not-run'), 'Empty bundle.js.sig should not execute overlay');
+    assert.ok(!result.stderr.includes('signature verification failed'),
+      `Empty bundle.js.sig should not produce signature warning, got stderr: ${result.stderr}`);
+    assert.ok(!result.stderr.includes('failed to read'),
+      `Empty bundle.js.sig should not produce read-error warning, got stderr: ${result.stderr}`);
+  });
+
   it('should reject overlay bundle signed by a different key', async (ctx) => {
     if (skipBinaryTests) return ctx.skip('No overlay-enabled cached binary available');
     const overlayCurrentDir = path.join(tmpDir, 'overlay', 'current');

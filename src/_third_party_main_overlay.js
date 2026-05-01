@@ -58,20 +58,29 @@ function tryLoadOverlayBundle(execDir) {
   const bundlePath = join(overlayDir, 'bundle.js');
   const sigPath = join(overlayDir, 'bundle.js.sig');
 
-  if (!fs.existsSync(bundlePath) || !fs.existsSync(sigPath)) {
-    return null;
-  }
-
-  let bundleData;
+  // Read the signature first — it's tiny (~70 bytes) — so a missing or empty
+  // sig short-circuits before we touch the (potentially much larger) bundle.
+  // Treats missing/empty files as non-existent, letting operators "disable"
+  // an overlay by truncating either file without log noise.
   let sigData;
-
   try {
-    bundleData = fs.readFileSync(bundlePath);
     sigData = fs.readFileSync(sigPath);
   } catch (err) {
-    process.stderr.write(`[js2bin] overlay: failed to read bundle files: ${err.message}\n`);
+    if (err.code === 'ENOENT') return null;
+    process.stderr.write(`[js2bin] overlay: failed to read signature file: ${err.message}\n`);
     return null;
   }
+  if (sigData.length === 0) return null;
+
+  let bundleData;
+  try {
+    bundleData = fs.readFileSync(bundlePath);
+  } catch (err) {
+    if (err.code === 'ENOENT') return null;
+    process.stderr.write(`[js2bin] overlay: failed to read bundle file: ${err.message}\n`);
+    return null;
+  }
+  if (bundleData.length === 0) return null;
 
   if (!EMBEDDED_SIGNING_PUBLIC_KEY) {
     process.stderr.write('[js2bin] overlay: no embedded signing key — binary was not built with --signing-public-key. Ignoring overlay bundle.\n');

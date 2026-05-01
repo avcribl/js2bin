@@ -143,6 +143,8 @@ Place the bundle artifacts where the binary will find them:
 
 The binary looks for bundles at `<binary-dir>/overlay/current/` by default. Override this with the `JS2BIN_OVERLAY_DIR` environment variable.
 
+Empty `bundle.js` or `bundle.js.sig` files are treated as if absent — the binary silently falls back to the embedded app. This lets you "disable" an overlay by truncating the files without producing log noise.
+
 ## Signature verification
 
 The binary verifies overlay bundles using ECDSA P-256 (SHA-256) against the public key stamped into the binary at `--build` time via `--signing-public-key`. That embedded key is the only accepted verifier — there is no on-disk key loading.
